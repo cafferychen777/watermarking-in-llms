@@ -8,12 +8,27 @@ This repository contains research materials and code for studying watermarking t
 The project uses a Conda environment for dependency management. To set up the environment:
 
 ```bash
-# Create and activate conda environment
-conda create -n watermark python=3.9
+# Create and activate conda environment from environment.yml
+conda env create -f environment.yml
 conda activate watermark
 
-# Install required packages
-pip install arxiv PyMuPDF Pillow pytesseract numpy tqdm
+# For macOS users, install tesseract using Homebrew
+brew install tesseract
+```
+
+If you need to update the environment after changes to `environment.yml`:
+```bash
+conda env update -f environment.yml
+```
+
+### API Configuration
+Before running the analysis scripts, set up your Anthropic API key:
+```bash
+# Option 1: Export as environment variable
+export ANTHROPIC_API_KEY='your-api-key-here'
+
+# Option 2: Create .env file
+echo "ANTHROPIC_API_KEY=your-api-key-here" > .env
 ```
 
 ## Data Collection and Processing
@@ -77,6 +92,8 @@ python scripts/pdf_to_text.py
 The processing results are stored in:
 - `data/text/*.txt`: Extracted text files
 - `logs/pdf_processing_*.log`: Processing logs with timestamps
+
+> Note: This implementation uses open-source tools (PyMuPDF and Tesseract) instead of commercial solutions like Mathpix. While this approach is cost-effective, it may not accurately capture mathematical formulas and equations. For research requiring precise mathematical content analysis, consider using specialized OCR services.
 
 ## Project Structure
 ```
@@ -168,3 +185,84 @@ The processing results are stored in:
    - ["WaterJudge: Quality-Detection Trade-off"](papers/WaterJudge.pdf)
    - ["Mark My Words: Analyzing and Evaluating Language Model Watermarks"](papers/Mark_My_Words.pdf)
    - ["WaterBench: Towards Holistic Evaluation of Watermarks"](papers/WaterBench.pdf)
+
+## Paper Analysis
+
+### Analysis Scripts
+The project includes scripts for analyzing watermarking papers using Claude API:
+
+```bash
+# List available papers
+python scripts/analyze_papers.py --list --input-dir data/text
+
+# Analyze a single paper
+python scripts/analyze_papers.py --mode single --papers "paper_name" --input-dir data/text
+
+# Analyze multiple papers in batch
+python scripts/analyze_papers.py --mode batch --papers "paper1" "paper2" --input-dir data/text
+```
+
+### Analysis Modes
+1. **Single Paper Analysis**
+   - Analyzes one paper at a time
+   - Focuses on core contributions and technical details
+   - Outputs to `results/analysis/analysis_[paper_name]_[timestamp].json`
+
+2. **Batch Analysis**
+   - Compares multiple papers (2-3 recommended)
+   - Focuses on unique innovations and comparative strengths
+   - Outputs to `results/analysis/batch_analysis_[paper_names]_[timestamp].json`
+
+### Analysis Focus
+The analysis particularly emphasizes:
+- Key innovations and unique contributions
+- Technical uniqueness compared to other approaches
+- Comparative strengths and trade-offs
+
+### Output Structure
+Analysis results are stored in JSON format with timestamps:
+```json
+{
+  "papers": ["paper1_name", "paper2_name"],
+  "analysis": {
+    "key_innovation": {
+      "unique_contribution": "...",
+      "difference_from_existing": "...",
+      "novel_problem_solved": "..."
+    },
+    "technical_uniqueness": {
+      "core_advantage": "...",
+      "unique_features": "...",
+      "special_capabilities": "..."
+    },
+    "comparative_strengths": {
+      "advantages": "...",
+      "improvements": "...",
+      "trade_offs": "..."
+    }
+  }
+}
+```
+
+### Directory Structure
+```
+.
+├── data/
+│   ├── abstract/
+│   │   └── papers_info.json
+│   └── text/
+│       └── *.txt
+├── results/
+│   └── analysis/
+│       └── *.json
+├── logs/
+│   └── *.log
+├── papers/
+│   └── *.pdf
+├── scripts/
+│   ├── analyze_papers.py
+│   ├── fetch_arxiv_abstracts.py
+│   └── pdf_to_text.py
+├── environment.yml
+└── README.md
+```
