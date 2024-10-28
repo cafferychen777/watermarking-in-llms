@@ -1,0 +1,1043 @@
+EmMark: Robust Watermarks for IP Protection of Embedded
+Quantized Large Language Models
+Ruisi Zhang
+ruz032@ucsd.edu
+University of California, San Diego
+La Jolla, California, USA
+Farinaz Koushanfar
+farinaz@ucsd.edu
+University of California, San Diego
+La Jolla, California, USA
+ABSTRACT
+This paper introduces EmMark, a novel watermarking framework
+for protecting intellectual property (IP) of embedded large lan-
+guage models deployed on resource-constrained edge devices. To
+address the IP theft risks posed by malicious end-users, EmMark
+enables proprietors to authenticate ownership by querying the wa-
+termarked model weights and matching the inserted signatures.
+EmMark’s novelty lies in its strategic watermark weight parame-
+ters selection, ensuring robustness and maintaining model quality.
+Extensive proof-of-concept evaluations of models from OPT and
+LLaMA-2 families demonstrate EmMark’s fidelity, achieving 100%
+success in watermark extraction with model performance preser-
+vation. EmMark also showcased its resilience against watermark
+removal and forging attacks.
+ACM Reference Format:
+Ruisi Zhang and Farinaz Koushanfar. 2018. EmMark: Robust Watermarks for
+IP Protection of Embedded Quantized Large Language Models. In Woodstock
+’18: ACM Symposium on Neural Gaze Detection, June 03–05, 2018, Wood-
+stock, NY. ACM, New York, NY, USA, 6 pages. https://doi.org/XXXXXXX.
+XXXXXXX
+1
+INTRODUCTION
+Deploying large language models (LLM) on resource-constrained
+edge platforms entails model compression [9, 18, 25] to reduce the
+model memory size and bandwidth. The compressed and embedded
+LLMs [15] reduce cost and energy for inference while enhancing
+local data privacy protection. Optimizing for the most compressed
+LLM within a quality bound is computationally costly, and thus, the
+resulting models become valuable intellectual property (IP) for the
+owners. Concurrently, unlike black-box cloud-based LLM APIs [16],
+compressed models deployed on edge devices grant full model
+access to end-users. The shift in the access paradigm introduced new
+security challenges for model copyrights and made the deployed
+models prone to IP theft attacks. Therefore, it is crucial to devise
+techniques to protect embedded model proprietors’ IPs.
+Watermarking protects the LLM proprietor’s IP by inserting
+unique signatures onto the model parameters. Prior solutions fall
+into two approaches: (i) training-time watermarking, and, (ii) post-
+training watermarking. During model training, training-time wa-
+termarking inserts signatures onto the parameter weight distribu-
+tions [2, 4] or as backdoors [11, 17] to generate unintended outputs
+via trojan activations. Such methods, however, are computationally
+heavy and hard to scale to the larger models.
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+2018. ACM ISBN 978-1-4503-XXXX-X/18/06
+https://doi.org/XXXXXXX.XXXXXXX
+Post-training watermarking is introduced in SpecMark [3] and
+adapted for LLMs in Qiu et.al. [10] to insert signatures onto the
+trained model weights. SpecMark converts model weights to the dis-
+crete cosine transform domain to encode signatures. Qiu et.al. [10]
+co-optimizes the full-precision and quantized LLMs to ensure wa-
+termarks as backdoors are in the full-precision model, and the quan-
+tized LLM lacks such malfunctions. These techniques successfully
+watermark full-precision models with dense weight distributions,
+where small additives can serve as watermarks. However, embed-
+ded and quantized 1 LLMs bring new challenges, in which weight
+distributions are discrete and sparse, allowing fewer alternatives
+for watermark insertion.
+This paper presents EmMark, a robust watermarking framework
+for protecting the IP of embedded LLMs deployed in resource-
+constraint edge devices. EmMark encompasses a watermark inser-
+tion stage and a watermark extraction stage. The watermark inser-
+tion encodes signatures into the quantized LLM by a novel scoring
+function. The function assesses each weight parameter from two
+aspects: (i) quality preservation by the sensitivity of weight parame-
+ters to signature insertion, and, (ii) robustness by watermarking on
+saliency weight channels critical to the LLM quality. The first item is
+evaluated by the absolute value of weight parameters, where larger
+values are less sensitive to addition and deletion during signature
+insertion. The second item is reflected from the full-precision model
+activation distribution [12], where weight channels with larger acti-
+vations are more salient. Leveraging the parameter scores, EmMark
+randomly selects a subset of best-performing candidates to encode
+the watermark signatures before model deployment.
+The watermark extraction reproduces the scoring function to
+obtain the watermark weight locations using the random seed,
+original model weights, and full precision model activations. Then,
+the model proprietor queries the watermarked model and decodes
+the signatures at the watermark weight locations. The ownership
+can be claimed by comparing the encoded and decoded signatures.
+The deployed watermarked LLM is resilient to watermark re-
+moval and forging attacks, aiming to remove or counterfeit the
+signature to misappropriate the IP. EmMark defends the watermark
+removal attacks by encoding on the salient region. The adversary
+has to perturb a larger portion of salient weight parameters to
+remove watermarks, leading to LLM quality compromises. The wa-
+termark insertion is also confidential. Adversaries without access
+to the full-precision model cannot reproduce the model activation
+for parameter scoring and, thereby, cannot obtain the watermark
+weight location for signature counterfeiting.
+1Note that the most significant aspect of compressed embedded models from the
+perspective of the watermark is quantization, which substantially changed weight
+distributions and data types. Thus, in the remainder of the paper, we use the terms
+compressed and quantized models interchangeably.
+arXiv:2402.17938v1  [cs.CR]  27 Feb 2024
+
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+Trovato and Tobin, et al., Ruisi Zhang, and Farinaz Koushanfar
+In brief, our contributions are summarized as follows:
+• Introduction of EmMark, a robust watermarking framework
+for embedded quantized LLMs deployed in resource-constraint
+edge devices. The watermark insertion stage leverages a novel
+scoring function to encode signatures with both quality
+preservation and robustness; The watermark extraction stage
+decodes signatures and asserts ownership.
+• Proof-of-concept experiments on embedded LLMs from OPT
+and LLaMA-2 families show EmMark achieves 100% water-
+mark extraction without quality degradations.
+• Analysis of EmMark capacity indicates up to 100-bit signa-
+tures can be inserted per layer into low-bit embedded LLMs
+without quality deterioration.
+• Extensive evaluations of EmMark under various watermark
+removal and forging attacks demonstrate its resiliency.
+2
+BACKGROUND AND RELATED WORK
+In this section, we first introduce the related work for large lan-
+guage model quantization. Then, we present literature on water-
+marking machine learning models.
+2.1
+Large Language Model Quantization
+On-device LLMs lessen the cost, power, and network requirements
+for running the powerful generative models while enhancing local
+data’s privacy [15]. Different model compression algorithms, like
+pruning [13, 19], and quantization [12, 24], are applied to reduce
+the model size and fit it into the resource constraints in the tar-
+get platforms. One of the most vital steps of deploying the model
+to the embedded platform for better inference speed is quanti-
+zation [12, 24] that maps a full-precision FP32/FP16 model onto
+lower-precision INT8/INT4.
+Due to the considerable fine-tuning overheads, training-aware
+quantizations are hard to be applied to LLMs. To address this, post-
+training quantization is commonly used to quantize LLMs without
+introducing significant computation burderns. Given the floating
+point tensor X, the number of bits 𝑁to quantize, Equation 1 de-
+picts how X is quantized into X with quantization step size Δ. In
+LLM quantization, the tensor X can be activations and/or weights,
+depending on the constraints in the target platform.
+X = Round
+ X
+Δ
+
+,
+Δ = max(|X|)
+2𝑁−1 −1
+(1)
+The post-training quantization goes in two directions [26]: (1)
+INT8 quantization [5, 24], where activation and/or weights are quan-
+tized into INT8; (2) Low-bit quantization [7, 12], where activation
+and/or weights are quantized to low bits like INT4. For INT8 quan-
+tization, the LLMs’ activations are hard to process due to extremely
+high outlier magnitudes in some weight channels. Llm.int8() [5]
+uses mixed-precision decomposition to isolate the outlier activa-
+tions into a float16 matrix multiplication. The rest of the param-
+eters use INT8 computation. Outlier Suppression [22] improves
+the scheme by applying non-scaling LayerNorm and token-wise
+clipping to reduce outliers. SmoothQuant [24] enhances the INT8
+quantization using a mathematically equivalent transformation to
+migrate high-magnitude activations to low-magnitude weights.
+For Low-bit quantization, GPTQ [7] uses second-order meth-
+ods to obtain a closed-form solution for the low-bit quantization
+optimization. However, it overfits the calibration dataset, and has
+bad generalization to new dataset distributions at the inference
+time. AWQ [12] improves low-bit quantization by identifying the
+salient weights in LLMs and rescaling the salient weights before
+quantization.
+2.2
+Machine Learning Model Watermarking
+Machine learning model watermarking refers to adding digital sig-
+natures onto the model parameters to enable ownership proof. Prior
+arts insert watermarks during the model training/fine-tuning stage.
+DeepSign [4] and DeepMarks [2] encode watermarks onto the prob-
+ability density function (pdf) of models’ weight distributions. It
+is implemented by adding the watermark signatures as an addi-
+tional regularization loss term during model training. Follow-up
+work also suggests adding backdoors during model training as wa-
+termarks [11, 17]. The models’ abnormal behaviors under certain
+trojan activations serve as watermarks to prove ownership. While
+the inserted watermarks are robust to potential attacks, the inser-
+tion process requires significant computation resources and is hard
+to scale up to LLMs.
+More recent post-training watermarking inserts watermarks on
+the full-precision trained model parameters. SpecMark [3] inserts
+watermarks on the audio models by first converting the parame-
+ters to the discrete cosine transform (DCT) domain. Then, it in-
+serts signatures at the high-frequency region of model parameters.
+Qiu et.al. [10] proposed to watermark LLMs by co-optimizing the
+full-precision and quantized LLMs. Its objective is to ensure the
+quantized LLM works normally, whereas the full-precision model
+is watermarked by pre-defined backdoors.
+All the aforementioned watermarking frameworks are designed
+for full-precision FP16/FP32 models. No previous work explored
+watermarking embedded quantized LLMs on edge devices. There-
+fore, we present EmMark as the first watermarking framework for
+embedded LLM and protecting owners’ IP in the edge.
+3
+THREAT MODEL
+Motivation. Deploying generative large language models in
+the edge fuels the broader applications for mobile users and IoT
+devices. For cloud LLM APIs like ChatGPT and GPT-4 [16], users
+only have black-box access to the LLMs. However, end-users in
+the edge devices have full access to the LLMs locally. The switch
+in the security model leads to new threats to the LLM copyrights.
+To defend against potential IP thefts, there is an urgent need to
+devise robust watermarking frameworks to protect embedded LLM
+owners’ IP in the edge.
+Scenario. The embedded LLMs deployed in the edge devices are
+compressed for better hardware efficiency. The most significant
+aspect of the compressed model from the watermarking perspec-
+tive is quantization, which maps the full-precision weights into
+INT8/INT4 for reduced memory size and bandwidth. The sparse
+weight distributions introduced new challenges for model water-
+marking compared with full-precision models.
+EmMark inserts owners’ signatures onto the compressed and
+quantized LLM before model deployment. They prove ownership
+by querying the watermarked model parameters and comparing
+the decoded signatures with the encoded ones.
+
+EmMark: Robust Watermarks for IP Protection of Embedded Quantized Large Language Models
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+Watermark Insertion
+Parameters Scoring
+Signature Insertion
+Watermark Extraction
+Deployed LLM
+Ownership Proof
+5
+9
+5
+10
+1
+8
+8
+3
+7
+2
+9
+8
+2
+9
+?
+WM
+.4
+.1
+.3
+.1
+.6
+.2
+.2
+.4
+.1
+.6
+.2
+.2
+.7
+.2
+Edge Device
+Decoded
+Signature
+WER Computation
+6
+8
+5
+9
+1
+7
+8
+3
+6
+2
+10
+9
+2
+8
+Original LLM
+Signature
+Figure 1: EmMark watermarking overview. The watermark insertion encodes signatures into the original LLM before deploy-
+ment. The watermark extraction decodes the signatures from the deployed LLM and proves ownership. The green circles in
+Parameters Scoring are candidate watermark locations, and the green weights in Signature Insertion are watermarked weights.
+The bold value is the model weight parameters, and the italics value is the corresponding scores S.
+Watermarking Criteria. An ideal watermarking framework
+should meet the following criteria [3]: (i) Fidelity: the watermarks
+should be successfully inserted into the models while preserving
+model quality; (ii) Robustness: the watermarks should withstand
+various removal or forging attacks; (iii) Efficiency: the watermark
+insertion should be efficient both in terms of time and computa-
+tion overheads. By taking these criteria into the design, EmMark
+emerges as a robust watermarking framework for embedded LLM
+IP protection on resource-constraint edge devices.
+Watermarking Threats. We assume the adversary in the edge
+devices has full access to the watermarked embedded LLM pa-
+rameters and has knowledge of watermark insertion algorithms.
+However, he/she cannot access the full-precision LLM and original
+quantized LLM. The adversary also does not know the owners’
+signatures or random seeds for watermark parameter selections.
+Potential threats to the embedded models include (i) parameter
+overwriting attacks [1], where other values replace model parame-
+ters; (ii) re-watermarking attacks [4], where adversary corrupts the
+original watermark by embedding new signatures; and (iii) forging
+attacks [1], where the adversary counterfeits fake watermarks from
+watermarked model and claim the model belongs to him.
+Note that parameter pruning and fine-tuning attacks cannot be
+applied to embedded LLM. Firstly, pruning the compressed model re-
+sults in model ability breakdown and generates outputs as NaN (Not
+a Number). Besides, fine-tuning quantized model like QLoRA [6]
+does not change quantized weights but adds additional linear low-
+rank adaptators to learn new features.
+4
+METHOD
+EmMark’s global flow is depicted in Figure 1, comprising two
+major steps, namely, watermark insertion and watermark extraction.
+The watermark insertion encodes watermark signatures into the
+compressed and quantized LLMs before deployment. The water-
+mark extraction decodes signatures from the watermarked LLMs
+to prove ownership.
+4.1
+Watermark Insertion
+EmMark takes the original 𝑁-bit compressed and quantized LLM
+𝑀and the signature sequence 𝐵= {𝑏1,𝑏2, ...,𝑏|𝐵|} as input. In 𝐵,
+each element 𝑏𝑖∈{−1, 1}. The watermarks are inserted into 𝑀’s
+weights W. The activation of corresponding full-precision LLM in
+each weight channel is A𝑓.
+Parameters Scoring. As mentioned in Section 3, the water-
+marked LLM shall: (i) preserve original models’ quality; and (ii) be
+robust against removal and forging attacks. We search for quan-
+tized weight parameters with such qualities by Equation 2, where
+S𝑞evaluates the quality preservation and S𝑟assesses the robustness.
+The two scores are weighted using coefficients 𝛼and 𝛽(𝛼, 𝛽> 0).
+S = 𝛼S𝑞+ 𝛽S𝑟
+(2)
+For 𝑖-th quantized weight parameter W𝑖, we measure its corre-
+sponding S𝑞and S𝑟to accommodate signature 𝑏𝑗as follows. The
+first quality score S𝑞is defined in Equation 3. Weight parameters
+with larger absolute values are less sensitive to slight changes (addi-
+tions/deletions) from watermark insertion. Thus, it results in better
+quality preservation. Note that W𝑖in the minimum and maximum
+quantization level is set to 0 before scoring.A smaller S𝑞indicates
+the weight is less sensitive to signature insertions.
+S𝑞= | 𝑏𝑗
+W𝑖
+|
+(3)
+The score S𝑟in Equation 4 measures the robustness of each
+quantized weight parameter. It defends against (i) removal attacks
+by watermarking on the salient region. To remove watermarks,
+the adversary has to perturb a larger fraction of saliency weights,
+resulting in LLM performance degradations. (ii) forging attacks by
+scoring with full-precision model. Adversary does not have access
+to the full-precision model, and cannot reproduce the score S𝑟for
+signature counterfeiting.
+The weight parameter saliency has strong correlations with
+the activation magnitudes. The larger activations process more
+incoming features, and the corresponding weight channels are
+more sailent [12]. Inspired by this, we formulate the saliency of the
+weight parameter in each channel as the normalization of current
+channel magnitude |A𝑓𝑖|. A smaller S𝑟indicates the weight channel
+contributes more to the LLM quality.
+S𝑟= |
+max (A𝑓)
+A𝑓𝑖−min (A𝑓) |
+(4)
+EmMark scores each quantized weight parameter using Equa-
+tion 2, and obtain the scores for each W. For the i-th weight param-
+eter W𝑖, a smaller score means the position is better for watermark
+insertion. Therefore, for a 𝑛quantization layer model, we choose
+𝐵𝑐smallest candidate weight parameters from W in every quan-
+tization layer as the candidate location for watermark insertion.
+Here, |𝐵| ≪|𝐵𝑐| × 𝑛.
+
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+Trovato and Tobin, et al., Ruisi Zhang, and Farinaz Koushanfar
+Metrics
+Method
+INT8 Quantization
+INT4 Quantization
+Model
+OPT
+LLaMA-2
+¯Δ
+OPT
+LLaMA-2
+¯Δ
+125M
+1.3B
+2.7B
+6.7B
+13B
+30B
+7B
+13B
+70B
+125M
+1.3B
+2.7B
+6.7B
+13B
+30B
+7B
+13B
+70B
+PPL ↓
+w/o WM
+48.72
+19.51
+18.25
+22.35
+16.41
+22.30
+9.26
+8.26
+4.93
+0
+33.97
+16.83
+14.61
+12.43
+11.60
+9.77
+9.47
+8.41
+4.94
+0
+SpecMark [3]
+48.72
+19.51
+18.25
+22.35
+16.41
+22.30
+9.26
+8.26
+4.93
+0
+33.97
+16.83
+14.61
+12.43
+11.60
+9.77
+9.47
+8.41
+4.94
+0
+RandomWM
+48.75
+19.56
+18.28
+22.43
+16.39
+22.37
+9.26
+8.31
+4.93
++0.03
+34.03
+17.56
+27.88
+14.07
+13.16
+10.77
+9.48
+8.43
+4.95
++2.29
+EmMark
+48.71
+19.49
+18.21
+22.34
+16.34
+22.28
+9.26
+8.26
+4.93
+0
+33.96
+16.83
+14.61
+12.43
+11.60
+9.75
+9.47
+8.41
+4.94
+0
+Zero-shot
+Acc (%) ↑
+w/o WM
+44.68
+56.66
+61.28
+65.36
+65.43
+67.59
+67.19
+69.05
+73.65
+0
+44.47
+57.63
+61.37
+64.52
+65.21
+67.87
+67.26
+68.89
+73.76
+0
+SpecMark [3]
+44.68
+56.66
+61.28
+65.36
+65.43
+67.59
+67.19
+69.05
+73.65
+0
+44.47
+57.63
+61.37
+64.52
+65.21
+67.87
+67.26
+68.89
+73.76
+0
+RandomWM
+44.60
+56.64
+61.14
+65.06
+65.47
+67.56
+66.98
+69.03
+73.21
+-0.13
+44.32
+57.58
+60.22
+64.45
+65.11
+67.75
+67.16
+68.74
+73.62
+-0.23
+EmMark
+45.34
+56.70
+61.35
+65.50
+65.43
+67.59
+67.19
+69.05
+73.65
+0
+44.49
+57.79
+61.38
+64.53
+65.23
+67.87
+67.29
+68.90
+73.76
+0
+WER (%) ↑
+SpecMark [3]
+0
+0
+0
+0
+0
+0
+0
+0
+0
+-
+0
+0
+0
+0
+0
+0
+0
+0
+0
+-
+RandomWM
+100
+100
+100
+100
+100
+100
+100
+100
+100
+-
+100
+100
+100
+100
+100
+100
+100
+100
+100
+-
+EmMark
+100
+100
+100
+100
+100
+100
+100
+100
+100
+-
+100
+100
+100
+100
+100
+100
+100
+100
+100
+-
+Table 1: Watermarked embedded large language models performance. The first and second cell is the LLM performance
+measured by perplexity (PPL) and zero-shot accuracy (Zero-shot Acc). The third cell is the watermark extraction rate (WER).
+The best metric values are in bold, and the text in grey means failed watermark insertion (0% WER). ¯Δ is the average performance
+degradation compared with non-watermarked models.
+Signature Insertion. To ensure the even signatures distribution,
+for a 𝑛quantization layer model, we insert |𝐵|
+𝑛
+signatures into
+each layer. To maintain the secrecy of inserted signatures, EmMark
+randomly choose |𝐵|
+𝑛weight parameters out of the |𝐵𝑐| candidates
+in the current layer using random seed 𝑑. EmMark obtains the
+watermark weight locations 𝐿. The insertion of watermarks follows
+Equation 5, where the signatures are encoded into the quantized
+weights. The watermark consists of (i) signature sequence 𝐵; (ii)
+the random seed 𝑑, the original quantized weight W, full-precision
+activation A𝑓, and 𝛼, 𝛽coefficients for location 𝐿reproduction.
+W′[𝐿𝑖] = W[𝐿𝑖] + 𝑏𝑖
+for 𝑖∈[1, |𝐵|]
+(5)
+4.2
+Watermark Extraction
+Ownership Proof. EmMark reproduces the watermark weight
+locations 𝐿with the random seed 𝑑, quantized model weights W,
+full-precision activation A𝑓, and 𝛼, 𝛽coefficients. At 𝐿, EmMark
+compares the extracted weight W′[𝐿] with the original weight
+W[𝐿] and gets their difference ΔW[𝐿] using Equation 6. Model
+owners can assert ownership by comparing ΔW[𝐿] with inserted
+signature sequence 𝐵.
+ΔW[𝐿] = W′[𝐿] −W[𝐿]
+(6)
+The watermark extraction rates are computed using Equation 7,
+where |𝐵| is the length of the inserted signature, and |𝐵|′ is the
+number of matching signature bits.
+%𝑊𝐸𝑅= 100 × |𝐵|′
+|𝐵|
+(7)
+Watermarking strength. Equation 8 evaluates the probability
+that a non-watermarked model matches the inserted signatures by
+chance. 𝑘is the number of matching bits between the owner’s and
+non-watermarked model’s signatures. |𝐵| is the signature length.
+The signature generation follows the Rademacher distribution, and
+each bit has an equal probability of 0.5 to be 1 or -1.
+𝑃𝑐=
+|𝐵|
+∑︁
+𝑖=𝑘
+ |𝐵|
+𝑖
+
+0.5|𝐵|
+(8)
+5
+EXPERIMENTS
+5.1
+Experiment Setup
+Target Model We use LLaMA-2 [21] and OPT [27] family mod-
+els with parameter sizes ranging from 125 million to 70 billion
+as the target LLM. The models are compressed and quantized by
+Smoothquant [24] to INT8 for OPT family, by LLM.int8() [5] to
+INT8 for LLaMA-2 family, and by AWQ [12] to INT4. Note that Em-
+Mark is agnostic to quantization algorithms. We use the the frame-
+works as a proof-of-concept showing EmMark’s performance. We
+watermark on top of the official model quantization instances [23].
+Watermark Parameters For the target model, we insert 300-bit
+signatures per INT8 quantized layer and 40-bit per INT4 quantized
+layer. It yields a minimum watermarking strength of 9.09 ×10−13
+for each layer, and 9.09 ×10−13𝑛for 𝑛quantized layer LLM follow-
+ing Equation 8. Such watermarking strength provides sufficient
+protection to the target models. The coefficients 𝛼and 𝛽are set to
+0.5 and 0.5. The seed for signature insertion is 100. For model size
+smaller than 6.7 billion, |𝐵𝑐|×𝑛
+|𝐵|
+= 50. For larger LLMs, |𝐵𝑐|×𝑛
+|𝐵|
+= 60.
+Baselines We compare EmMark with RandomWM where water-
+marks are inserted in random indexes and SpecMark where water-
+marks are inserted into the high-frequency region transformed by
+DCT. SpecMark is designed for full precision models, and we apply
+the transformation to the quantized weights.
+Evaluation Metrics The watermarked LLM performance is evalu-
+ated using Perplexity (PPL) for text fluency on WikiText Dataset [14],
+and, Zero-shot Accuracy (Zero-shot Acc) for token prediction on the
+mean of LAMBADA, HellaSwag, PIQA, and WinoGrande Datasets [8];
+the watermark extraction performance is evaluated using the per-
+centage of signatures successfully extracted as Watermark Extrac-
+tion Rate (WER); the watermark efficiency is evaluated using the
+Insertion Time (Time) and required GPU Memory (Memory).
+5.2
+Results
+EmMark’s Fidelity. Different watermarking frameworks’ per-
+formance is in Table 1. The first and the second cells are the per-
+plexity and zero-shot accuracy degradation for accommodating the
+signatures. The third cell is the watermark extraction rates.
+Comparison with RandomWM: While RandomWM performs
+on par with the non-watermarked models in INT8 quantization, it
+failed to preserve lower-bit quantization models quality. Its perfor-
+mance drops significantly in INT4 quantization, where the degra-
+dation is 2.29 and 0.23%, respectively, for perplexity and zero-shot
+accuracy. As a result, the watermarked LLM has worse text fluency.
+
+EmMark: Robust Watermarks for IP Protection of Embedded Quantized Large Language Models
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+In contrast, EmMark introduced no performance degradations com-
+pared with non-watermarked LLMs in both INT8 and INT4 quan-
+tization. By strategically scoring quantized parameters, EmMark
+preserved the model quality during watermark insertion.
+Comparison with SpecMark: As seen from Table 1, SpecMark
+failed to watermark embedded LLM and achieved 0% WER in both
+INT8 and INT4 quantization. The weight distributions in embed-
+ded LLMs are sparse, and the small additions/deletions from the
+DCT domain cannot change the discrete parameters in the weight
+domain. As a result, SpecMark failed to watermark such LLMs. Em-
+Mark, however, successfully inserted signatures into the embedded
+model without introducing additional quality deterioration.
+EmMark’s Efficiency. The efficiency is evaluated by the re-
+quired time (Time) and GPU memory (Memory) for watermark
+insertion on the OPT family models [27]. In Table 2, we report the
+average time/memory for signature insertion per quantization layer.
+For both INT8 and INT4 quantization, the time taken to watermark
+one quantization layer is less than 0.4s. The insertion takes less
+than 10 minutes for the largest OPT-30B model. All of EmMark’s
+components are performed on CPUs, and no additional GPU mem-
+ory is required for watermark insertion. As such, the efficient and
+lightweight watermarking scheme makes EmMark scalable to LLMs
+with larger parameter sizes.
+Quantization
+Time (s)
+Memory (GB)
+INT8
+0.4
+0
+INT4
+0.3
+0
+Table 2: EmMark’s watermarking efficiency.
+5.3
+Robustness
+We evaluate EmMark’s robustness by performing the following
+attacks: (i) parameter overwriting attacks, (ii) re-watermark attacks,
+and (iii) forging attacks. We use the OPT-2.7B [27] model quantized
+to INT4 by AWQ [12] as the target model.
+The embedded model is already compressed and quantized. There-
+fore, additional pruning attacks will result in model ability break-
+down. Current fine-tuning on the quantized models uses LoRA-
+based approaches [6] to add low-rank adaptors to learn new dataset
+features. Such methods, however, will not change the quantized
+model weight parameters, and cannot be used to remove signatures.
+Parameter Overwriting Attacks. The adversary removes the
+watermark by randomly adding one bit to the parameter weights
+in the watermarked model. The attacked model performance (per-
+plexity and zero-shot accuracy) and watermark extraction rates are
+shown in Figure 2(a). The number of overwritten parameters in each
+quantized layer is increased from 100 to 500 with a constant gap of
+100. As seen, the attacked model performance drops as more bits
+are overwritten. The threshold renders significant model quality
+degradations is at 300-bit, where the PPL is over 100 and indicates
+bad generated text fluency. Nevertheless, EmMark demonstrates
+its robustness under such attacks and maintains over 99% WER.
+Re-watermark Attacks. The adversary knows EmMark’s gen-
+eral watermark insertion algorithm. However, he/she cannot access
+the model owners’ signatures or random seeds. The adversary tries
+to break the watermark by perturbing parameters potentially used
+for watermarking. The watermark coefficients 𝛼and 𝛽and seed
+differ from the watermark insertion stage and are set to 1, 1.5, and
+22, respectively. The activation for scoring S𝑟is obtained from the
+quantized LLM instead of the full-precision one. The quantization
+model performance (perplexity and zero-shot accuracy) and wa-
+termark extraction rates are shown in Figure 2(b). The number of
+perturbed parameters in each quantized layer is increased from 100
+to 300 with a constant gap of 50.
+Figure 2(b) shows EmMark maintains its high watermark ex-
+traction rates under re-watermark attacks. The threshold for bad
+LLM quality is at 300 bits, where the zero-shot accuracy is below
+20% and yields bad token prediction performance. However, the
+watermarked model still maintains over 95% watermark extraction
+rates, providing sufficient IP protection to the embedded LLM.
+0
+100 200 300 400 500
+50
+100
+150
+PPL
+PPL
+0
+100 200 300 400 500
+60
+70
+80
+90
+100
+Zero-Shot Acc/WER (%)
+Zero-shot Acc
+WER
+(a) Parameter Overwriting Attacks
+0
+100 150 200 250 300
+20
+40
+60
+80
+PPL
+PPL
+0
+100 150 200 250 300
+20
+40
+60
+80
+100
+Zero-Shot Acc/WER (%)
+Zero-shot Acc
+WER
+(b) Re-watermark Attacks
+Figure 2: EmMark’s performance under parameter overwrit-
+ing and re-watermarking attacks. The left subplot evaluates
+Perplexity (PPL), and the right subplot depicts Zero-shot Ac-
+curacy and Watermark Extraction Rate (WER).
+Forging Attacks. The adversary does not remove the LLM own-
+ers’ watermark. Instead, he/she claims the model ownership by
+faking another set of watermarks. It is achieved by (i) counterfeiting
+the watermark weight locations 𝐿𝑎with a fake signature sequence;
+(ii) re-watermarking on top of the watermarked embedded LLM
+by a counterfeited full-precision model activations and insertion
+hyperparameters. EmMark is resilient to the two settings with a
+confidential full-precision model’s activation that the adversary
+does not have access to.
+In the first setting, the watermark weight locations are a re-
+production of the full-precision model’s activations and a set of
+hyperparameters (random seed and scoring coefficients). Coun-
+terfeiting the location 𝐿𝑎without such reproduction validation
+process leads to failed forging attacks. In the second setting, while
+the adversary proves ownership of the re-watermarked model, the
+inserted signatures from owners are still highly extractable as seen
+from the Re-watermark Attacks section. Notably, matching the
+owners’ signatures by coincidence is nearly impossible and the
+
+Conference acronym ’XX, June 03–05, 2018, Woodstock, NY
+Trovato and Tobin, et al., Ruisi Zhang, and Farinaz Koushanfar
+probability goes as low as 9.09 ×10−13𝑛for 𝑛quantization layer
+LLM following Equation 8. Here, 𝑛=192 for OPT-2.7B, and larger
+as the model size grows. As such, the owners are able to claim
+ownership under forging attacks and protect the IP.
+5.4
+Ablation Study and Analysis
+We provide further ablation study and analysis of EmMark’s capa-
+bilities. The OPT-2.7B [27] quantized by AWQ [12] to INT4 is the
+target model.
+Effectiveness of Watermark Coefficients. We analyze how dif-
+ferent 𝛼and 𝛽choices affect EmMark’s watermarking performance
+in Table 3. 𝛼is changed from 0 to 1, and 𝛽is changed from 1 to 0.
+The maximum watermark signature length is set to 100. As shown,
+as the coefficient 𝛽becomes larger, EmMark tends to choose bits
+in the saliency channel over bits with larger values. While such
+insertion ensures strong IP protection, the watermarked LLM’s
+quality is compromised.
+(𝛼, 𝛽)
+PPL ↓
+Zero-shot Acc (%) ↑
+WER (%) ↑
+(1, 0)
+14.61
+61.36
+100
+(0.5, 0.5)
+14.61
+61.36
+100
+(0, 1)
+14.65
+61.25
+100
+Table 3: Effectiveness of different insertion coefficients.
+Watermark Capacities. We show the maximum signature length
+can be inserted into the embedded LLM without compromising its
+quality in Figure 3. We increase the inserted length per quantization
+layer from 50 to 200 with a constant gap of 50. As seen, the thresh-
+old for maintaining watermarked LLM performance is at 100 bit. It
+corresponds to a watermark strength of 1.57×10−30 per layer and
+1.57×10−5760 for OPT-2.7B model following Equation 8, providing
+sufficient protection to the model IP.
+0
+50
+100
+150
+200
+15
+20
+25
+30
+35
+PPL
+58
+59
+60
+61
+Zero-Shot Acc (%)
+PPL
+Zero-shot Acc
+Figure 3: EmMark’s
+watermark
+perfor-
+mance with inserted
+signature
+lengths
+increased from 50-bit
+to 200-bit. All of the
+watermarks are suc-
+cessfully extracted.
+Watermark Integrity. To ensure integrity, EmMark shall only
+prove ownership of watermarked models and generate low WER
+on non-watermarked ones. In Table 4, the first model is the non-
+watermarked OPT-2.7B quantized by AWQ [12], the second model
+is fine-tuned on a 4k subset of the Alpaca dataset [20] before
+AWQ [12] quantization, the third model is fine-tuned on Wiki-
+Text dataset [14] before AWQ [12] quantization, and the fourth
+model is non-watermarked OPT-2.7B quantized by GPTQ [7]. The
+EmMark successfully extracts all signatures from the watermarked
+model and fails to prove ownership of non-watermarked ones. As
+a result, EmMark demonstrates its integrity.
+Model
+WM
+non-WM 1
+non-WM 2
+non-WM 3
+non-WM 4
+WER (%)
+100
+0
+0
+0
+0
+Table 4: EmMark’s integrity evaluation on watermarked and
+non-watermarked models.
+6
+CONCLUSION
+We present EmMark, a novel watermarking framework for embed-
+ded large language models. It inserts signatures into the compressed
+and quantized models while demonstrating quality preservation
+and robustness. As such, it tackles the security challenges arising
+from deploying large language models in edge devices and protects
+the IP of model owners. Extensive evaluations on OPT and LLaMA-
+2 family models show EmMark successfully inserts 100% signatures
+into the LLM with no performance compromises.
+REFERENCES
+[1] Franziska Boenisch. 2021. A systematic review on model watermarking for neural
+networks. Frontiers in big Data 4 (2021), 729663.
+[2] Huili Chen et al. 2019. Deepmarks: A secure fingerprinting framework for digital
+rights management of deep learning models. In ICMR. 105–113.
+[3] Huili Chen et al. 2020. SpecMark: A Spectral Watermarking Framework for IP
+Protection of Speech Recognition Systems.. In INTERSPEECH. 2312–2316.
+[4] Bita Darvish Rouhani et al. 2019. Deepsigns: An end-to-end watermarking
+framework for ownership protection of deep neural networks. In ASPLOS.
+[5] Tim Dettmers et al. 2022. Llm. int8 (): 8-bit matrix multiplication for transformers
+at scale. arXiv preprint arXiv:2208.07339 (2022).
+[6] Tim Dettmers et al. 2023. Qlora: Efficient finetuning of quantized llms. arXiv
+preprint arXiv:2305.14314 (2023).
+[7] Elias Frantar et al. 2022. Gptq: Accurate post-training quantization for generative
+pre-trained transformers. arXiv preprint arXiv:2210.17323 (2022).
+[8] Leo Gao et al. 2021. A framework for few-shot language model evaluation. https:
+//doi.org/10.5281/zenodo.5371628
+[9] Mojan Javaheripi et al. 2022. LiteTransformerSearch: Training-free Neural Archi-
+tecture Search for Efficient Language Models. NeurIPS 35 (2022), 24254–24267.
+[10] Linyang Li et al. 2023. Watermarking LLMs with Weight Quantization. arXiv
+preprint arXiv:2310.11237 (2023).
+[11] Yiming Li et al. 2022. Untargeted backdoor watermark: Towards harmless and
+stealthy dataset copyright protection. NeurIPS 35 (2022), 13238–13250.
+[12] Ji Lin et al. 2023. AWQ: Activation-aware Weight Quantization for LLM Com-
+pression and Acceleration. arXiv preprint arXiv:2306.00978 (2023).
+[13] Xinyin Ma et al. 2023. LLM-Pruner: On the Structural Pruning of Large Language
+Models. arXiv preprint arXiv:2305.11627 (2023).
+[14] Stephen Merity et al. 2016. Pointer sentinel mixture models. arXiv preprint
+arXiv:1609.07843 (2016).
+[15] Qualcomm. 2022. Whitepaper: The future of AI is hybrid. Qualcomm blog (2022).
+[16] John Schulman et al. 2022. ChatGPT: Optimizing language models for dialogue.
+OpenAI blog (2022).
+[17] Masoumeh Shafieinejad et al. 2021. On the robustness of backdoor-based water-
+marking in deep neural networks. In ACM IH&MMSec workshop. 177–188.
+[18] David So et al. 2021. Searching for efficient transformers for language modeling.
+NeurIPS 34 (2021), 6010–6022.
+[19] Mingjie Sun et al. 2023. A Simple and Effective Pruning Approach for Large
+Language Models. arXiv preprint arXiv:2306.11695 (2023).
+[20] Rohan Taori et al. 2023. Stanford Alpaca: An Instruction-following LLaMA model.
+https://github.com/tatsu-lab/stanford_alpaca.
+[21] Hugo Touvron et al. 2023. Llama 2: Open foundation and fine-tuned chat models.
+arXiv preprint arXiv:2307.09288 (2023).
+[22] Xiuying Wei et al. 2022. Outlier suppression: Pushing the limit of low-bit trans-
+former language models. NeurIPS 35 (2022), 17402–17414.
+[23] Thomas Wolf et al. 2019. Huggingface’s transformers: State-of-the-art natural
+language processing. arXiv preprint arXiv:1910.03771 (2019).
+[24] Guangxuan Xiao et al. 2023. Smoothquant: Accurate and efficient post-training
+quantization for large language models. In ICML. 38087–38099.
+[25] Runxin Xu et al. 2022. From dense to sparse: Contrastive pruning for better
+pre-trained language model compression. In AAAI, Vol. 36. 11547–11555.
+[26] Zhewei Yao et al. 2023. A comprehensive study on post-training quantization for
+large language models. arXiv preprint arXiv:2303.08302 (2023).
+[27] Susan Zhang et al. 2022. OPT: Open Pre-trained Transformer Language Models.
+arXiv:2205.01068

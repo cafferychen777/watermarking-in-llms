@@ -1,0 +1,2022 @@
+arXiv:2306.09194v1  [cs.CR]  25 May 2023
+Undetectable Watermarks for Language Models
+Miranda Christ∗
+Columbia University
+Sam Gunn∗†
+UC Berkeley
+Or Zamir∗
+Princeton University
+June 16, 2023
+Abstract
+Recent advances in the capabilities of large language models such as GPT-4 have spurred
+increasing concern about our ability to detect AI-generated text. Prior works have suggested
+methods of embedding watermarks in model outputs, by noticeably altering the output distribu-
+tion. We ask: Is it possible to introduce a watermark without incurring any detectable change
+to the output distribution?
+To this end we introduce a cryptographically-inspired notion of undetectable watermarks for
+language models. That is, watermarks can be detected only with the knowledge of a secret key;
+without the secret key, it is computationally intractable to distinguish watermarked outputs from
+those of the original model. In particular, it is impossible for a user to observe any degradation
+in the quality of the text. Crucially, watermarks should remain undetectable even when the
+user is allowed to adaptively query the model with arbitrarily chosen prompts. We construct
+undetectable watermarks based on the existence of one-way functions, a standard assumption
+in cryptography.
+∗Equal contribution.
+†Supported by a Google PhD Fellowship.
+
+Contents
+1
+Introduction
+3
+1.1
+Related Work . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+4
+1.2
+Organization of the Paper . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+6
+2
+Modeling the Problem
+6
+2.1
+Preliminaries
+. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+6
+2.2
+Language Models . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+7
+2.3
+Entropy and Empirical Entropy . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+7
+2.4
+Watermarks . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+8
+2.5
+Undetectable Watermarks . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+9
+2.6
+Statement of our Theorems . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+10
+3
+Simpliﬁed Construction
+10
+3.1
+Watermarks assuming random oracle and high min-entropy . . . . . . . . . . . . . . . . . . .
+10
+3.2
+Removing the high min-entropy assumption . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+11
+3.3
+Removing the random oracle assumption . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+12
+4
+Constructing Undetectable Watermarks
+13
+4.1
+Reduction to a Binary Alphabet
+. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+13
+4.2
+Overview of the Construction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+13
+4.3
+Constructing Undetectable Watermarks
+. . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+16
+4.4
+Constructing Substring-Complete Watermarks
+. . . . . . . . . . . . . . . . . . . . . . . . . .
+21
+5
+Necessity of Assumptions
+24
+6
+Removing Watermarks
+26
+6.1
+Empirical Attacks on Watermarking Schemes . . . . . . . . . . . . . . . . . . . . . . . . . . .
+27
+6.2
+Removing any Undetectable Watermark . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+27
+7
+Open Problems
+29
+2
+
+1
+Introduction
+With the rise in the use of artiﬁcial models that churn out human-like text, there’s also an increase
+in the potential for misuse. Imagine a student employing a language model to eﬀortlessly write her
+“Machine Learning 101” homework or conjuring up tear-jerking emails to beg professors for easier
+exams. That’s when the need arises to distinguish between texts penned by a language model and
+those crafted by human hands. The go-to method of employing a heuristic test to determine if a text
+was AI-generated, however, grows increasingly fragile as large language models (LLMs) advance.
+Even the cutting-edge detectors, like GPTZero [Tia23], can be outsmarted with cleverly crafted
+prompts.
+Ultimately, as LLM outputs move closer to becoming identical to human-generated text, this
+approach becomes hopeless. It is already very hard to tell, for instance, that the previous paragraph
+was written by such a model. To overcome this problem, it is reasonable to consider intentionally
+modifying the model to embed watermarks into the text. Recent work of [KGW+23] introduced
+such watermarks in the context of LLMs. However, existing watermarking schemes come with a
+cost: To plant a useful watermark, the distribution of texts the model generates has to be noticeably
+changed. In fact, for existing schemes it is possible for the user to distinguish between outputs of
+the original model and of the watermarked one, and it is hence possible that the quality of text
+degrades.
+We show how to plant watermarks with the following properties, stated informally, in any LLM.
+1. (Undetectability) It is computationally infeasible to distinguish between the original and the
+watermarked models, even when the user is allowed to make many adaptive queries.
+In
+particular, the quality of generated text remains identical.
+2. (Completeness) There is a secret key that enables eﬃcient detection of responses from the
+watermarked model, as long as “enough randmoness” was used to generate the response. The
+detection works even when presented with only a contiguous sub-string from the response,
+and it doesn’t require any other information.
+3. (Soundness) Any text generated independently from the secret key has a negligible chance of
+being detected as watermarked.
+We note that the existence of a secret key is necessary, as otherwise Properties (1) and (2) would
+directly contradict each other. However, in practice the secret key can be published if one wishes;
+Property (1) still ensures that the quality of the text is imperceptibly changed for all uses not
+involving the secret key.
+An important aspect of our construction is that Properties (1) and (3) will always hold, for any
+LLM with any choice of parameters, and without making any assumptions on the text. Our scheme
+is the ﬁrst to have these properties, and we argue that they are completely crucial. First, the creator
+of a state-of-the-art LLM is unlikely to intentionally degrade the quality of their model, making
+Property (1) necessary for any practical watermarking scheme. As the quality and versatility of
+LLMs has reached such high levels, any noticeable change due to the watermark is liable to have
+adverse side-eﬀects in some situations. Second, falsely accusing humans of using LLMs to generate
+their texts should be completely unacceptable. When heuristics are used for detection, this will
+always be a possibility — indeed, instances of such false accusations against students have already
+made news headlines [Fow23, Jim23], and concerningly, false accusations are more common for
+3
+
+non-native English writers [LYM+23]. Property (3) in our construction rigorously guarantees that
+natural text will not be detected as watermarked.
+Of course, a watermark is only useful if it can be detected with the secret key. If the model
+has a deterministic response to some prompt, then we should not be able to embed the watermark
+in that response (as any change to the output would necessarily be detectable). For Property (2),
+we therefore need to assume that enough “randomness” was used in the generation of the speciﬁc
+text we are considering. We introduce a formal notion that we call empirical entropy, and show
+that this condition is necessary. Our detection algorithm works when it is given text containing any
+consecutive sub-string with enough empirical entropy from an output of the model.
+Primary contributions of this work include the formal deﬁnition and construction of undetectable
+watermarks, and the notion of empirical entropy that quantiﬁes the randomness used in the gener-
+ation of a speciﬁc output. These deﬁnitions and our results appear in Section 2.
+1.1
+Related Work
+Approaches for detecting AI-generated text largely fall into two categories. Watermarking schemes
+alter the output of a language model in a way that a corresponding detection algorithm can identify.
+Post-hoc detectors leave the output of the model unchanged and instead identify AI-generated text
+using existing diﬀerences between natural language and the model’s output.
+Post-hoc detectors.
+The simplest post-hoc detectors use natural heuristics to distinguish be-
+tween human- and AI-generated text. These heuristics include relative entropy scoring [LUY08],
+perplexity [Ber16], and other statistical methods [GSR19]; see [Ber16] for a survey of such meth-
+ods. Other post-hoc detectors (e.g., [ZHR+19, MLK+23, Tia23, KAAL23]) are themselves models,
+speciﬁcally trained for this binary classiﬁcation task. Unfortunately, these heuristic and model-based
+methods lack formal guarantees, and it’s possible to train a model to transform AI-generated text
+in a way that evades them; see, e.g., [KSK+23, SKB+23]. For example, [KSK+23] trains a model to
+paraphrase text output by language models, fooling common post-hoc detectors such as GPTZero
+[Tia23], DetectGPT [MLK+23], and the detector developed by OpenAI [KAAL23]. Furthermore,
+simple tricks such as instructing the model in the prompt to write a response that evades a detector,
+or varying the model’s parameters (e.g., increasing the temperature and frequency/presence penal-
+ties for GPT-4), fool [Tia23]. [CBZ+23] prove that as AI-generated text more closely resembles
+natural text, post-hoc detectors will need longer text samples.
+See [JAML20] for more comprehensive background on post-hoc detection of AI-generated text
+and attacks.
+Language watermarking schemes.
+Several schemes (e.g., [AF21, QZL+23, YAJK23, MZ23])
+involve using an ML model in the watermarking algorithm itself. [AF21, MZ23] work by taking a
+passage of text and using a model to produce a semantically similar altered passage. By nature
+of using machine learning, these constructions have no formal guarantees and rely on heuristic
+arguments for undetectability, soundness, and correctness.
+In a recent work, [KGW+23] presented the ﬁrst watermarking scheme for LLMs with any formal
+guarantees. They showed that a watermark can be planted in outputs with large enough entropy
+(with a deﬁnition diﬀerent than ours, yet morally similar). However, their watermarking scheme
+crucially changes the distribution of generated texts and uses this change to detect the water-
+mark. They bound the diﬀerence between the original distribution and the distribution of their
+4
+
+watermarked model, using a quantity called perplexity. In contrast, in our work the original and
+watermarked output distributions are completely indistinguishable.
+The authors of this paper are also aware of an ongoing watermarking project of [Aar22], which
+he mentions in his blog. It appears that in this project, the guarantee is that the two distributions
+will be indistinguishable, but only as long as no two output texts are seen that share a common
+substring of a certain length. In contrast, our construction guarantees undetectability without any
+assumption on the texts or the model. In particular we allow the distinguisher to make adaptive
+queries with arbitrary prompts, so it may force the model to return outputs that share long parts
+with each other.
+Our scheme, as well as those of [KGW+23] and [Aar22] are vulnerable to simple attacks such as
+the “emoji attack”1 discussed in [KGW+23]. We discuss attacks on watermarking schemes further
+in Section 6.1.
+Steganography.
+Steganography is the study of encoding a hidden message into a given channel
+(e.g., natural language or an image) such that a recipient possessing a key can read the message
+but an eavesdropping adversary cannot determine whether a message is present. [HvAL09] deﬁnes
+security of a steganography scheme against a chosen hiddentext attack (CHA) as the requirement
+that an adversary cannot determine whether a given oracle is for the original distribution or the
+distribution embedded with a hiddentext. Porting this deﬁnition over to the watermark setting,
+one would obtain undetectability. However, the corresponding steganography schemes we are aware
+of would not obtain undetectability without making assumptions about the entropy of the channel.
+Crucially, in our setting where prompts for the language model are adversarially chosen, we want
+to retain undetectability even if the adversary submits a prompt with a deterministic response.
+Part of the reason for this diﬀerence stems from the access that the watermark and encoding
+algorithms have to the channel (or the distribution of the language model’s output). In steganogra-
+phy, the encoding algorithm has only oracle access to the channel. In our language model setting,
+the watermark algorithm receives from the model a full description of the probability distribution
+pi for each token. Because of this limited access, steganography schemes largely either rely on as-
+sumptions about the entropy of the channel (e.g., [HvAL09]) or lose security when the channel has
+low entropy (e.g., [DIRR09]). Our watermark is undetectable regardless of the entropy of the text.
+We achieve this guarantee exactly by using the watermark algorithm’s access to the distributions
+pi. Using this knowledge, the algorithm is able to compute the empirical entropy of its output thus
+far. Once the empirical entropy is suﬃciently high, it uses the output as a random seed for a PRF
+used to embed the watermark in subsequent tokens. Importantly, our algorithm alters the output
+distribution only once it has collected enough entropy; in the steganography schemes, the encoding
+algorithm with only oracle access does not know when this has happened.
+This complete knowledge of each token distribution pi separates the problem of watermarking
+language models from watermarking more generally. One prior steganography scheme for language
+models, [KJGR21], operates in our regime where the encoding algorithm has access to each pi.
+However, it assumes that the decoding algorithm has access to each pi as well. This is unrealistic
+for watermarking, as the probability distributions pi for the output of the model on some prompt
+depend on that prompt. A watermark detection algorithm, which receives only the output and not
+the prompt, does not know the distributions pi. In practice, it would be unrealistic to assume that
+1https://twitter.com/goodside/status/1610682909647671306
+5
+
+a detector trying to determine whether an essay was generated by a language model would also be
+given the prompt used to generate it.
+Watermarking.
+The ﬁeld of digital watermarking focuses on the problem of covertly planting a
+signal in a medium (e.g., an image or text) such that it can be detected by an algorithm. [ARC+01,
+ARH+03] present some of the ﬁrst watermarking schemes for NLP-generated text, though their
+schemes rely on a syntactic tree structure that was present in NLP models at that time but no
+longer used today. [HMW07] formally deﬁnes watermarking and desired properties, though these
+deﬁnitions are not tailored to language models.
+Other related work.
+Recently, [GKVZ22] used a cryptographic construction to embed unde-
+tectable backdoors into neural networks. In both their work and ours, cryptographic notions of
+indistinguishability are used in the context of machine-learning, rather than empirical notions.
+1.2
+Organization of the Paper
+In Section 2 we formally deﬁne our model, introduce the notions of empirical entropy and unde-
+tectable watermarks, and outline our results. In Section 3 we sketch a simple watermarking scheme
+that achieves undetectability, but falls short of our main scheme in other respects. In Section 4 we
+construct our undetectable watermarks with strong completeness and soundness guarantees. We
+include an overview of these constructions in Section 4.2. In Section 5 we discuss the necessity
+of the assumptions we make. In Section 6 we discuss possible methods of removing watermarks
+from texts. In particular, we prove that it is impossible to create undetectable watermarks that are
+completely unremovable, under certain assumptions. In Section 7 we summarize and discuss open
+problems.
+2
+Modeling the Problem
+2.1
+Preliminaries
+Notation.
+Let λ denote the security parameter. A function f of λ is negligible if f(λ) ∈O(
+1
+poly(λ))
+for every polynomial poly(·). We denote f(λ) ≤negl(λ) to mean that f is negligible. For a vector or
+sequence of tokens s = (s1, . . . , s|s|) and positive integers b ≥a, let s[a : b] denote (sa, . . . , sb). We
+use log(x) to denote the logarithm base 2 of x, and ln(x) to denote the natural logarithm of x. For
+integer n > 0, we deﬁne [n] := {1, . . . , n}. For integers n ≥k > 0, we deﬁne [k, n] := {k, . . . , n}.
+Pseudorandom function (PRF).
+Let F = {Fsk : {0, 1}ℓ1(λ) →{0, 1}ℓ2(λ)|sk ∈{0, 1}λ} be a
+family of functions. F is a PRF if Fsk is eﬃciently computable and for all p.p.t. distinguishers D,
+
+Pr
+sk←{0,1}λ
+h
+DFsk(·)(1λ) = 1
+i
+−Pr
+f
+h
+Df(·)(1λ) = 1
+i ≤negl(λ)
+where f denotes a random function from {0, 1}ℓ1(λ) to {0, 1}ℓ2(λ). PRFs are a standard crypto-
+graphic primitive equivalent to one-way functions and can be constructed from standard assump-
+tions [GGM86, HILL99].
+6
+
+2.2
+Language Models
+We loosely follow [KGW+23] in our deﬁnition of a language model. We will often refer to language
+models simply as models.
+Deﬁnition 1. A language model Model over token set T is a deterministic algorithm that takes as
+input a prompt prompt and tokens previously output by the model x = (x1, . . . , xi−1), and outputs
+a probability distribution pi = Model(prompt, x) over T .
+A language model Model is used to generate text as a response to a prompt by iteratively
+sampling from the returned distribution until a special terminating token done ∈T is drawn.
+Deﬁnition 2. A language model’s response to a prompt prompt is a random variable Model(prompt) ∈
+T ⋆that is deﬁned algorithmically as follows. We begin with an empty list of tokens x = (). As long
+as the last token in x is not done, we draw a token xi from the distribution Model(prompt, x) and
+append it to x. Finally, we set Model(prompt) = x.
+Throughout the text we will make use of a security parameter λ. We will assume that our
+model never outputs text of length super-polynomial in λ. (For OpenAI’s language models, there
+is actually a ﬁxed limit to the length of generated text.)
+2.3
+Entropy and Empirical Entropy
+Let log(x) denote the logarithm base 2 of x. For a probability distribution D over elements of a
+ﬁnite set X, we deﬁne the Shannon entropy of D as
+H(D) = E
+x∼D[−log D(x)],
+where D(x) is the probability of x in the distribution D.
+The empirical entropy of x in D is
+simply −log D(x). The expected empirical entropy of x ∼D is exactly H(D). Intuitively, the
+empirical entropy of x (with respect to D) is the number of random bits that were required to
+draw x out of the distribution D. The entropy H(D) is thus the expected number of random bits
+needed to draw an element out of the distribution D.
+We thus deﬁne the empirical entropy of a model’s response as follows.
+Deﬁnition 3. For a language model Model, a prompt prompt, and a possible response x ∈T ⋆, we
+deﬁne the empirical entropy of Model responding with x to prompt as
+He(Model, prompt, x) := −log Pr
+ Model (prompt) = x
+
+.
+We next generalize the deﬁnition of empirical entropy from whole outputs to substrings out of a
+model’s output. Intuitively, we want to measure how much entropy was involved in the generation
+of a particular contiguous substring of the output.
+Deﬁnition 4. For a language model Model, a prompt prompt, a possible response x ∈T ⋆, and
+indices i, j ∈[|x|] with i ≤j we deﬁne the empirical entropy on substring [i, j] of Model responding
+with x to prompt as
+H[i,j]
+e
+(Model, prompt, x) := −log Pr
+
+Model (prompt) [i : j] = x[i : j]
+| Model (prompt) [1 : (i −1)] = x[1 : (i −1)]
+
+.
+7
+
+We sometimes write Hi
+e := H[i,i]
+e
+to denote the empirical entropy of a single token i. We remark
+that in expectation, Deﬁnition 3 simply captures the entropy in the response generation. That is,
+we have
+E
+x [He(Model, prompt, x)] = H
+ Model (prompt)
+
+,
+where x ∼Model (prompt).
+2.4
+Watermarks
+We formally deﬁne a watermarking scheme as follows.
+Deﬁnition 5. A watermarking scheme for a model Model over T is a tuple of algorithms W =
+(Setup, Wat, Detect) where:
+• Setup(1λ) →sk outputs a secret key, with respect to a security parameter λ.
+• Watsk(prompt) is a randomized algorithm that takes as input a prompt prompt and generates
+a response in T ⋆.
+• Detectsk(x) →{true, false} is an algorithm that takes as input a sequence x ∈T ⋆outputs true
+or false.
+Ideally, Detectsk(x) should output true if x is generated by Watsk(prompt), and should output
+false if x is generated independently of sk. The former property is called completeness and the latter
+soundness.
+Deﬁnition 6. A watermarking scheme W is sound if for every security parameter λ and token
+sequence x ∈T ⋆of length |x| ≤poly(λ),
+Pr
+sk←Setup(1λ)[Detectsk(x) = true] ≤negl(λ).
+A scheme is sound if any text that is generated independently from sk has negligible probability
+of being detected as watermarked by Detectsk. Essentially, this means we will never see a false-
+positive detection.
+Deﬁning completeness requires care: It is not reasonable to require Detectsk to detect any se-
+quence x generated by Watsk(prompt) for some prompt, as it is possible that x is very short, or
+that Model(prompt) is deterministic or has very low entropy. Instead, we require Detectsk to detect
+watermarks only in responses for which the entropy in the generation process is high enough.
+Deﬁnition 7. A watermarking scheme W is b(L)-complete if for every security parameter λ and
+prompt prompt of length |prompt| ≤poly(λ),
+Pr
+sk←Setup(1λ)
+x←Watsk(prompt)
+[Detectsk(x) = false and He (Model, prompt, x) ≥b (|x|)] ≤negl(λ).
+Deﬁnition 7 guarantees that any output generated by Watsk with empirical entropy at least b(L),
+where L is the length of the output, will be detected as watermarked with high probability. Essen-
+tially, this means we will never see a false-negative detection on any output of high enough empirical
+8
+
+entropy. In Section 5 we show that it is necessary to consider the empirical entropy of the speciﬁc
+output rather than the standard entropy of the entire model.
+We also generalize Deﬁnition 7 to capture contiguous substrings of outputs. That is, we should
+be able to detect a watermarked output of Watsk even if Detectsk is only given a long enough
+contiguous substring from it.
+Deﬁnition 8. A watermarking scheme W is b(L)-substring-complete if for every prompt prompt
+and security parameter λ,
+Pr
+sk←Setup(1λ)
+x←Watsk(prompt)
+h
+∃i, L ∈[|x|] such that Detectsk(x[i : i + L]) = false
+and H[i:i+L]
+e
+(Model, prompt, x) ≥b(L)
+i
+≤negl(λ).
+This means that every contiguous part of an output of the watermarking procedure, that has
+high enough empirical entropy, is detected as watermarked with high probability. We stress that
+the empirical entropies in Deﬁnitions 7 and 8 are deﬁned with respect to the original model Model,
+without reference to the watermarking procedure Watsk.
+We also note that the empirical en-
+tropy He(Model, prompt, x) is only used as part of the deﬁnition, and is not necessarily known
+to Detectsk.
+It is in general not possible to compute He(Model, prompt, x) without knowledge
+of prompt.
+2.5
+Undetectable Watermarks
+Finally, we deﬁne the notion of computationally undetectable watermarking schemes. Intuitively, a
+scheme is undetectable if it is infeasible to distinguish between the distributions of Model and Watsk,
+even when those can be queried adaptively with arbitrary prompts.
+Deﬁnition 9. A watermarking scheme W = (Setup, Wat, Detect) is undetectable if for every secu-
+rity parameter λ and all polynomial-time distinguishers D,
+Pr
+h
+DModel,Model(1λ) →1
+i
+−
+Pr
+sk←Setup(1λ)[DModel,Watsk(1λ) →1]
+ ≤negl(λ),
+where the notation DO1,O2 means that D is allowed to adaptively query both O1 and O2 with arbitrary
+prompts.
+Note that in the above deﬁnition, we allow the distinguisher access to Model itself as well
+as Model or Watsk. The only thing that is kept secret from the distinguisher is the secret key.
+It is important to remark that in any undetectable watermarking scheme, the quality of outputs
+must be identical between Model and Watsk, as otherwise it would be possible to distinguish between
+them. In particular, embedding the watermark does not degrade the quality of the generated text
+at all.
+We ﬁnally note that a watermarking scheme can be made public by publishing the secret key sk.
+Then, everyone can run the detection algorithm Detectsk. In particular, the scheme is no longer
+undetectable as Detectsk can be used to distinguish between Model and Watsk. Nevertheless, we still
+maintain the property that there is no degradation in the quality of watermarked outputs, as long
+as the deﬁnition of “quality” does not depend on the secret key sk.
+9
+
+2.6
+Statement of our Theorems
+We are now ready to formally state the guarantees of the watermarking schemes that we present.
+To warm up, in Section 3 we give a simple construction of an O (λ)-complete scheme, but it only
+achieves a much weaker notion of soundness, and the watermarking algorithm runs in expected
+poly(λ) time rather than strict poly(λ) time. In Section 4.3, we prove the following theorem by
+introducing an eﬃcient watermarking scheme with Algorithms 3 and 4.
+Theorem 1. For any model Model we construct a watermarking scheme W that is undetectable,
+sound, and O(λ
+√
+L)-complete.
+This means that our watermarking scheme is always undetectable and sound, and is also com-
+plete as long as there is enough empirical entropy in the model’s response.
+In Section 5 we show that it is necessary for the completeness parameter b(L) to be reasonably
+large, with respect to λ. In fact, we show that it is inherent that low empirical entropy outputs are
+not watermarked in any undetectable watermarking scheme for any model.
+To strengthen Theorem 1, we also present a modiﬁed scheme (Algorithms 5 and 6) in Section 4.4
+which obtains substring completeness, with similar parameters.
+Theorem 2. For any model Model we construct a watermarking scheme W that is undetectable,
+sound, and O(λ
+√
+L)-substring-complete.
+In Section 6 we discuss known attacks on methods of detecting AI-generated text. We also prove
+that any undetectable watermarking scheme is removable, if the model enables a fairly strong form
+of query access and if one is willing to expend a number of queries that grows linearly with the size
+of generated text. Finally, in Section 7 we pose some open problems related to this work.
+3
+Simpliﬁed Construction
+In this section we describe a simple construction of an undetectable watermarking scheme that
+achieves Θ (λ)-completeness. However, this scheme falls short of our main constructions in Section 4
+in two important ways. First, it has a false-positive rate of ε = 1/poly(λ) instead of negl(λ). We
+call such a scheme ε-weakly-sound. Second, the watermarking procedure Watsk is not very eﬃcient:
+Its expected run-time is polynomial in the length of the output and in 1
+ε, but the worst-case running
+time of Watsk is unbounded.
+Later, in Section 4 we present our main construction which is undetectable, sound, complete (in
+fact, it is even substring-complete) and eﬃcient, yet achieves suboptimal completeness. Bridging
+this gap is an interesting open problem discussed in Section 7.
+Let b ∈N be a parameter to be chosen later; the rate of false positives will be 2−b. First, let’s
+assume that after the initialization, both WatO and DetectO have access to a random oracle O. This
+is a truly random function; that is, whenever O is called with a new input it returns a uniformly
+random string in {0, 1}b, and it returns a consistent answer when queried with a previously queried
+input.
+3.1
+Watermarks assuming random oracle and high min-entropy
+We begin by adding another strong assumption, that the min-entropy of the response to any
+prompt is at least 5λ. Equivalently, let prompt be a prompt and assume that for every x, we
+10
+
+have He(Model, prompt, x) ≥5λ. We deﬁne the watermarking scheme as follows. The distribution
+of WatO(prompt) is deﬁned as the distribution of x ∼Model(prompt) conditioned on O(x) = 0b.
+Equivalently, WatO(prompt) repeatedly draws outputs from Model(prompt) until the ﬁrst time
+it gets a response x for which O(x) = 0b, and then it returns x. Note that this requires 2b calls
+to Model(prompt) in expectation. To detect whether a string x is watermarked, DetectO simply
+checks whether O(x) = 0b. We assume that b ≤λ and sketch a proof for the above scheme being
+weakly sound, complete and undetectable.
+Weakly Sound:
+For any string x, the value of O(x) is truly random by the assumption. Thus,
+it is detected as watermarked with probability 2−b.
+Complete:
+By deﬁnition, WatO(prompt) only produces outputs x such that O(x) = 0b, which
+are detected as watermarked by DetectO.
+Undetectable:
+Let D be a distinguisher that can query WatO(prompt) at most 2λ times. In
+expectation, the total number of times WatO(prompt) queries Model(prompt) to answer all queries
+is at most 2λ·2b ≤22λ (since b ≤λ by assumption). As the probability of each output x to be output
+by Model(prompt) is at most 2−5λ, and as 22λ ≪
+√
+25λ, with high probability O is never queried
+twice on the same input. If O is never queried on the same input twice, then it simply outputs an
+independent random value for each query. In particular, the process of repeatedly sampling x ∼
+Model(prompt) until O(x) = 0b is equivalent to repeatedly sampling x ∼Model(prompt) until an
+independent, fresh random string is 0b — which is identical to simply sampling x ∼Model(prompt).
+3.2
+Removing the high min-entropy assumption
+We next deﬁne a scheme that no longer requires the assumption about the min-entropy of the model.
+We do so by only watermarking outputs with empirical entropy higher than 6λ, corresponding to
+the deﬁnition of (6λ)-complete schemes.
+Let prompt be any prompt and consider the probability
+p :=
+Pr
+x←Model(prompt)
+[He (Model, prompt, x) > 6λ] .
+Denote by M≤the distribution x ∼Model(prompt) conditioned on He (Model, prompt, x) ≤6λ.
+Similarly, denote by M> the distribution x ∼Model(prompt) conditioned on He (Model, prompt, x) >
+6λ. Drawing x ∼Model(prompt) is equivalent to the following process: with probability p, we
+draw a string out of the distribution M>, otherwise, we draw a string out of M≤.
+Therefore, we consider the following natural algorithm for WatO. We ﬁrst ﬂip a biased coin c ∼
+Bernoulli(p). If c = 0 then we draw an output from the distribution M≤. If c = 1, then we apply the
+algorithm of Section 3.1 — that is, we draw an output from the distribution x ∼M> conditioned
+on O(x) = 0b.
+This scheme is again weakly sound, and it is complete for every output x with empirical entropy
+at least 6λ because these outputs will always satisfy O(x) = 0b. If p ≤2−λ, then undetectability is
+straightforward: with all but negligible probability, the distinguisher will only see outputs from M≤,
+which we did not change. Otherwise, p > 2−λ and thus the distribution M> is of min-entropy at
+least 6λ −λ = 5λ. In particular, the construction of Section 3.1 applied to M> is guaranteed to be
+undetectable.
+11
+
+We ﬁnally note that it is intractable to compute the value of p or the conditional distribu-
+tions M≤, M>.
+We avoid their explicit computation as follows.
+To implement WatO, we ﬁrst
+draw a string x ∼Model(prompt).
+Computing the empirical entropy He(Model, prompt, x)
+given Model, prompt, x is straightforward. The probability that He(Model, prompt, x) > 6λ is
+of course exactly p. Thus, we can check if He(Model, prompt, x) ≤6λ. If so, we simply output x.
+Otherwise, we need to sample a response from M> conditioned on its output under O being 0b.
+We can do so by repeatedly sampling x ∼Model(prompt) until both He(Model, prompt, x) > 6λ
+and O(x) = 0b. Note that the probability of success is now p·2−b, and thus in expectation 1
+p2b tries
+are needed, which may be very large if p is small. On the other hand, we only reach this loop with
+probability p; hence, the expected number of queries from Model(prompt) our algorithm makes
+is 1 + p · 1
+p2b = 1 + 2b.
+3.3
+Removing the random oracle assumption
+The construction presented so far uses a random oracle O, which is impossible to implement.2
+Often, as we also do later in Section 4, a random oracle can be replaced with a cryptographic
+pseudorandom function (PRF, deﬁned in Section 2.1). However, the ineﬃciency of WatO requires
+being careful about this switch.
+A PRF with a security parameter λ requires memory and runtime poly(λ) and is guaranteed to
+be indistinguishable from a random oracle only to distinguishers that run in time poly(λ) as well.
+As WatO runs in (expected) time 2b, we must choose b = O(log λ) for the PRF to behave as a
+random oracle. This implies that the soundness is no longer negl(λ), but is at least
+1
+poly(λ).
+Pseudo-code for this simpliﬁed scheme is presented in Algorithms 1 and 2. We state the prop-
+erties of this scheme in Theorem 3 without proof; the proofs of these properties were sketched in
+the preceding two sections.
+Theorem 3. For any λ, Model and b ≤O(log λ), Algorithms 1 and 2 are a watermarking scheme W
+that is undetectable, (6λ)-complete, and 2−b-weakly-sound. On expectation, Watsk makes 1+2b calls
+to Model to generate each response.
+Algorithm 1: Weakly-sound watermarking algorithm Watsk
+Data: A prompt (prompt) and a secret key sk
+Result: Watermarked text x
+1 x ←Model(prompt);
+2 if He(Model, prompt, x) > 6λ then
+3
+while Fsk(x) ̸= 0b or He(Model, prompt, x) ≤6λ do
+4
+x ←Model(prompt);
+5
+end
+6 end
+7 return x;
+This construction already demonstrates the importance of our completeness deﬁnition (Deﬁ-
+nition 7): Only trying to watermark outputs of high empirical entropy was crucial for this simple
+2Note that we cannot sample the values of O on-the-ﬂy, because Wat and Detect need to agree on all of the used
+values.
+12
+
+Algorithm 2: Weakly-sound watermarking detector Detectsk
+Data: Text x and a secret key sk
+Result: true or false
+1 if Fsk(x) = 0b then
+2
+return true;
+3 else
+4
+return false;
+5 end
+construction’s undetectability. As we will see in Section 5, only watermarking high empirical entropy
+outputs is in fact inherent to undetectable watermarking schemes.
+4
+Constructing Undetectable Watermarks
+4.1
+Reduction to a Binary Alphabet
+For ease of presentation and analysis, we describe our watermarking scheme as operating on text
+encoded as a binary string. That is, we assume that the token set is T = {0, 1}.
+Note that this assumption is without loss of generality: We can easily convert a model M with
+an arbitrary token set T into a model M′ with a binary token set. First, we encode each token
+in T as a distinct string in {0, 1}log |T |; note that every codeword has length at most log |T |. For
+GPT-4, the number of tokens is |T | = 100, 277, and thus log |T | ≈17 [Ope23]. Let E denote this
+encoding function, and let pi be a distribution over T output by M. We convert pi into a series of
+distributions p′
+i,j for M′, where p′
+i,1 is the distribution of the ﬁrst bit of the codeword corresponding
+to a token sampled from pi. That is, p′
+i,1(0) = Prt←pi[E(t)1], where E(t)1 denotes the ﬁrst bit
+of E(t). Let bi,1 denote the bit sampled by M′ from p′
+i,1. Each subsequent p′
+i,j is then sampled
+according to the distribution of the jth bit of the codeword corresponding to a token sampled from
+pi, conditioned on the previous bits being equal to bi,1, bi,2, . . . , bi,j−1. After M′ samples the last bit
+of the current token from p′
+i,|T |, it calls M to obtain the distribution pi+1 for the next token.
+Therefore, a watermarking scheme for binary alphabets can be used on models with token
+alphabets of arbitrary size using the above reduction. We note that the expected length of the
+encoding can be reduced by using a Huﬀman encoding of the token set instead of an arbitrary
+encoding.
+4.2
+Overview of the Construction
+In Section 3, we saw a simple scheme that plants a watermark by sampling only texts for which an
+easily checkable predicate holds. In order to make this scheme more eﬃcient, a natural idea is to
+sample tokens one at a time. If we don’t require undetectability, an easy way to do this is to use a
+{0, 1}-valued hash function h and sample tokens xj with preference for those satisfying h(xj) = 1.
+Given some text, we can determine whether a watermark is present by computing the hash of each
+token. In watermarked text, more tokens should hash to 1 than to 0; in un-watermarked text, there
+should be no bias. This is a classic idea in steganography, discussed in [HvAL09]. It is essentially
+the idea used in [KGW+23].
+13
+
+Unfortunately, this strategy signiﬁcantly alters the output distribution, making it easily de-
+tectable: It prefers half of the words in the token set.
+As long as a biasing strategy yields a
+signiﬁcant expected gap between the incidence of some predicate in watermarked text versus nat-
+ural text, the resulting scheme should yield an observable watermark. Our objective is to plant a
+signal without noticeably changing the distribution of each token.
+We ﬁrst discuss a watermarking scheme that can only be used to generate a single output text
+of a predetermined maximum length L, for an arbitrary prompt. The secret key shared by the
+watermarked model and the detection algorithm will be a sequence ⃗u = u1, . . . , uL of uniformly
+chosen real numbers in the range [0, 1]. Even though this state is independent of the prompt the
+model will receive, we show that this shared state is enough to plant a watermark in any single
+response. From the perspective of a user who doesn’t know the secret key ⃗u, the distribution of
+outputs is not changed at all.
+When generating a response, the watermarked model will use the secret key to decide on each
+output token. Consider the generation of the j-th token in the response, after the previous tokens
+are already decided. Let pj(1) denote the probability, according to the real model, of this token
+being 1. The watermarked model outputs xj = 1 if uj ≤pj(1) and xj = 0 otherwise. As uj was
+drawn uniformly from [0, 1], the probability that the watermarked model output xj = 1 is exactly
+pj(1). Therefore, the distribution of generated text (in a single response) does not change at all.
+Nevertheless, we next show that the detection algorithm can compare the generated text to the
+shared sequence ⃗u, and deduce that the generated output was drawn from the watermarked model.
+For each text bit xj, the detection algorithm can compute a score
+s(xj, uj) =
+(
+ln 1
+uj
+if xj = 1
+ln
+1
+1−uj
+if xj = 0
+.
+Given a string x = (x1, . . . , xL), the detection algorithm sums the score of all text bits
+c(x) =
+L
+X
+j=1
+s(xj, uj).
+Crucially, the detection algorithm does not need to know the distributions with which the model
+produces output bits. Since the detection algorithm does not have access to the prompt, it would
+not be able to compute those distributions.
+We observe that the expected score is higher in watermarked text, as uj is correlated with
+the output bit xj. In non-watermarked text, the value of uj is independent of the value of xj.
+Therefore, s(xj, uj) is simply an exponential random variable with mean 1:
+E
+uj[s(xj, uj)] =
+Z 1
+0
+ln(1/x) dx = 1,
+and we have E⃗u[c(x) −|x|] = 0.
+14
+
+For watermarked outputs, on the other hand,
+E
+uj[s(xj, uj)] =
+Z pj(1)
+0
+ln 1
+u du +
+Z 1
+pj(1)
+ln
+1
+1 −u du
+=
+Z pj(1)
+0
+ln 1
+u du +
+Z pj(0)
+0
+ln 1
+u du
+=
+ pj(1) −pj(1) · ln pj(1)
+
++
+ pj(0) −pj(0) · ln pj(0)
+
+= 1 + ln(2) · H(pj),
+and the total expected score is
+E
+⃗u[c(x) −|x|] = ln 2 · H(Model(prompt)).
+We’ve shown that there’s a substantial gap between the expected scores of watermarked and
+natural text, as long as the text generation has high entropy. This should give us hope that this
+biasing strategy yields a reliable detector, but there are a few obstacles left on the way.
+First, the expectation argument turns out to not be very useful because the variance of the score
+could be large. In Section 5 we discuss why this implies that we must consider empirical entropy
+instead of the entropy of the entire model. In Sections 4.3 and 4.4 we use empirical entropy to build
+eﬀective distinguishers.
+Second, the scheme described above is only indistinguishable for a single response, and that
+response must be shorter than the secret key. A natural idea is to use a psuedorandom function
+(refer to Section 2.1 for a deﬁnition) to determine the values uj, instead of drawing them all in
+advance. For example, by setting uj = Fsk(j) the length of any single response no longer has to
+be bounded. As Fsk is queried on each input j at most once, the values of uj are pseudorandom
+and the distribution of a single watermarked output is computationally indistinguishable from the
+original distribution. The question becomes: Can we deal with multiple responses? One of our main
+contributions, and the most substantial diﬀerence from all prior work, is to answer this question in
+the aﬃrmative.
+Let r(i) be a unique identiﬁer assigned to each response. This might be a global counter or a
+random string (usually referred to as a nonce). To sample the j-th token of the i-th response we
+can use u(i)
+j
+= Fsk(r(i), j). If all pairs (r(i), j) are unique, then the values of u(i)
+j
+are pseudorandom.
+However, the detection algorithm needs to know r(i) to compute the detection score. If r(i) is a
+counter, then we would need to keep a global state to maintain it. Moreover, to use the detection
+algorithm we would need to enumerate over all possible counter values. If r(i) is a long random
+string, no global state is needed, but the detection algorithm still needs to know r(i). While r(i)
+must be recoverable by the detection algorithm, it cannot simply be written in the output text, as
+we might as well just append “WATERMARK!” to it instead (which would obviously change the
+distribution of outputs). Our solution is to use real randomness to generate the ﬁrst few tokens of
+each output, keeping track of how much entropy we used in the process. Once this entropy passes
+some speciﬁed threshold, we use the high-entropy preﬁx as r(i).
+Since these preﬁxes have high
+enough entropy, all choices of r(i) will be unique with all but negligible probability. The detection
+algorithm will test whether any preﬁx in the text, if used as r(i), will yield an unusually high score
+for the remainder of the text. The details of this construction are presented in Section 4.3.
+In the above sketch the detector needs the entire output from the model to detect the watermark.
+We describe a modiﬁcation of this scheme in Section 4.4 which is able to detect the watermark,
+15
+
+even when it is given only an contiguous substring of the output with suﬃciently high entropy.
+Essentially, this modiﬁcation works the same except it “resets” the choice of r(i) whenever enough
+new entropy is observed.
+4.3
+Constructing Undetectable Watermarks
+Let poly1(·), poly2(·) be polynomials.
+Let Fsk : {0, 1}poly1(λ) →{0, 1}poly2(λ) be a PRF, where
+sk ∈{0, 1}λ. We wish to interpret the output of Fsk as a real number in [0, 1]. We do so by letting
+z be the integer representation of the output and taking
+z
+2poly2(λ) . We consider poly2 to be a large
+polynomial and ignore ﬂoating point errors. In the below algorithms, we allow Fsk to take strings
+of varying length as input; we assume that poly1(·) is chosen such that these strings are never too
+long, and if they are too short we pad them. In this section we assume that the token alphabet is
+binary as discussed in Section 4.1. We let done denote the binary encoding of the “done" token,
+and we write done ∈(x1, . . . , xk) if and only if the decoding of (x1, . . . , xk) in the original token
+alphabet includes done.
+Algorithm 3: Complete watermarking algorithm Watsk
+Data: A prompt (prompt) and a secret key sk
+Result: Watermarked text x1, . . . , xL
+1 i ←1;
+2 H ←0;
+3 while done /∈(x1, . . . , xi−1) do
+4
+pi ←Model(prompt, x1, . . . , xi−1);
+5
+if H < λ then
+// Collect more internal entropy
+6
+Sample xi ←pi;
+7
+H ←H −log pi(xi);
+8
+if H ≥λ then
+9
+r ←(x1, . . . , xi);
+10
+end
+11
+else
+// Embed the watermark
+12
+xi ←
+1[Fsk(r, i) ≤pi(1)];
+13
+end
+14
+i ←i + 1;
+15 end
+In this section we let W = (Setup, Wat, Detect) denote the watermarking scheme where Wat is
+Algorithm 3, Detect is Algorithm 4, and Setup(1λ) samples sk ←{0, 1}λ. This scheme is outlined
+above in Section 4.2.
+Let WatO and DetectO be the same algorithms as Watsk and Detectsk, except that they use
+a random oracle O instead of Fsk. Since both algorithms only make black-box use of Fsk, these
+are well-deﬁned. Denote this random oracle scheme by WO (which does not need a Setup algo-
+rithm). Undetectability, b(L)-(substring-)completeness, and soundness are deﬁned identically for
+WO, except we replace the probabilities over sk ←Setup(1λ) with probabilities over O ←{f :
+16
+
+Algorithm 4: Complete detector Detectsk
+Data: Text x1, . . . , xL and a secret key sk
+Result: true or false
+1 for i ∈[L] do
+2
+r(i) ←(x1, . . . , xi);
+3
+Deﬁne v(i)
+j
+:= xj · Fsk(r(i), j) + (1 −xj) · (1 −Fsk(r(i), j)) for j ∈[L];
+4
+if PL
+j=i+1 ln
+
+1/v(i)
+j
+
+> (L −i) + λ
+√
+L −i then
+5
+return true;
+6
+end
+7 end
+8 return false;
+{0, 1}poly1(λ) →{0, 1}poly2(λ)}. Note that in the deﬁnition of undetectability for WO, the distin-
+guisher will not be given access to the random oracle O (since the distinguisher for W is not given
+access to Fsk).
+Lemma 1. The watermarking scheme W is undetectable/b(L)-(substring-)complete/sound if and
+only if WO is undetectable/b(L)-(substring-)complete/sound, assuming the security of the PRF used
+in W.
+Proof. The security of the PRF says that black-box access to Fsk (for random sk) is indistinguishable
+from black-box access to a random O, for any polynomial-time distinguisher. Observe that Algo-
+rithms 3 and 4 both only make black-box use of Fsk. Therefore it is possible to eﬃciently test, using
+only black-box access to Fsk, whether a given text/prompt/distinguisher violates soundness/b(L)-
+(substring-)completeness/undetectability. The security of the PRF then implies that the advantage
+of any given text/prompt/distinguisher is at most negl(λ) diﬀerent between W and WO.
+Lemma 2. Let E1, . . . , En be i.i.d. exponential random variables with rate 1, and let E := Pn
+i=1 Ei
+be their sum. Then for any τ > 0,
+(a) Pr
+
+E ≥n + √τn
+
+≤
+  4
+5
+√τ, and
+(b) Pr
+
+E ≤n −√τn
+
+≤e−τ/2.
+Proof. We start with part (a). By [Jan18, Theorem 5.1(i)],
+Pr
+
+E ≥n + √τn
+
+≤e−n·
+√
+τ/n−ln
+
+1+√
+τ/n
+
+=
+ 
+e
+√
+τ/n
+1 +
+p
+τ/n
+!−n
+.
+If τ ≥n, then since 1 + z ≤2z for z ≥1 we have
+ 
+e
+√
+τ/n
+1 +
+p
+τ/n
+!−n
+≤
+e
+2
+−√τn
+≤
+4
+5
+√τn
+.
+17
+
+If τ ≤n, then using ez ≥1 + z + z2/2 for z ≥0 we have
+ 
+e
+√
+τ/n
+1 +
+p
+τ/n
+!−n
+≤
+ 
+1 +
+p
+τ/n + τ/2n
+1 +
+p
+τ/n
+!−n
+=
+ 
+1 +
+τ/2n
+1 +
+p
+τ/n
+!−n
+≤
+
+1 + τ
+4n
+−n
+≤
+
+1 + 1
+4
+−τ
+=
+4
+5
+τ
+,
+where we have also used the fact that (1 + z
+n)n is monotonically increasing in n.
+We now turn to part (b). By [Jan18, Theorem 5.1(iii)],
+Pr
+
+E ≤n −√τn
+
+≤en·
+√
+τ/n+ln
+
+1−√
+τ/n
+
+= e
+√τn ·
+
+1 −
+p
+τ/n
+n
+.
+If τ ≥n, the probability becomes 0. If τ < n, then taking the natural logarithm the above becomes
+√τn + n ln
+
+1 −
+p
+τ/n
+
+= √τn ·
+
+1 +
+ln
+
+1 −
+p
+τ/n
+
+p
+τ/n
+
+
+≤√τn ·
+ 
+1 −
+2
+2 −
+p
+τ/n
+!
+≤−τ/2
+where for 0 < z < 1 we have used the facts that ln(1−z)
+z
+≤
+−2
+2−z and
+2
+2−z ≥1 + z
+2.
+Theorem 4. W is a sound watermarking scheme.
+Proof. Recall the deﬁnition of soundness in Deﬁnition 6. By Lemma 1 it suﬃces to show that for
+any text x = x1, . . . , xL,
+Pr
+O [DetectO(x) = true] ≤negl(λ).
+For i, j ∈[L], deﬁne r(i), v(i)
+j
+as in Algorithm 4 and let u(i)
+j
+:= O(r(i), j).
+Recall that v(i)
+j
+=
+xj · u(i)
+j
++ (1 −xj) · (1 −u(i)
+j ).
+Since u(i)
+j
+is independent from xj, we have v(i)
+j
+∼U([0, 1]). Therefore, E(i)
+j
+:= ln
+
+1/v(i)
+j
+
+are
+independent exponential random variables with rate parameter 1. By Lemma 2,
+Pr
+
+
+L
+X
+j=i+1
+E(i)
+j
+> (L −i) + λ
+√
+L −i
+
+≤
+4
+5
+λ
+.
+18
+
+By a union bound over all L possible values of i, the probability of Algorithm 4 returning true is at
+most L · (4/5)λ = negl(λ), completing the proof.
+Theorem 5. W is a
+
+4
+ln 2λ
+√
+L
+
+-complete watermarking scheme.
+Proof. Recall the deﬁnition of completeness in Deﬁnition 7. By Lemma 1 it suﬃces to show that
+for every prompt,
+Pr
+O
+x←WatO(prompt)
+[DetectO(x) = false and He (Model, prompt, x) ≥b(|x|)] ≤negl(λ)
+(1)
+where b(L) =
+4
+ln 2λ
+√
+L.
+In fact, we will prove something stronger:
+For every ﬁxed x ∈T ⋆
+and prompt such that He(Model, prompt, x) ≥
+4
+ln 2λ
+p
+|x|, if each bit xi of x has empirical entropy
+Hi
+e(Model, prompt, x) ≤λ,
+Pr
+O
+
+DetectO(x) = false | WatO(prompt) = x
+
+≤negl(λ).
+(2)
+Inequality 2 says that for any possible ﬁxed output x that has high empirical entropy (which isn’t too
+concentrated on any particular bit), conditioning on WatO outputting it, it is likely to be detected
+as watermarked. Note that the probability here is over the choice of outputs of O and not over x,
+which is ﬁxed.
+Observe that Inequality 2 is not falsiﬁable, so we cannot do the PRF switch (Lemma 1) with
+it. However, since each bit has at most a 2−λ chance of having empirical entropy more than λ,
+Inequality 2 implies Inequality 1 via the law of total probability.
+In order to prove Inequality 2, we just need to show that the correct choice of preﬁx r, determined
+on Line 9 of Algorithm 3, has a high score (since Detect tries every possible preﬁx).
+Let x =
+x1, . . . , xL where L := |x|, and let ℓ:= |r| where r is the correct preﬁx. For j ∈[ℓ+ 1, L], let
+vj := xj ·uj +(1−xj)·(1−uj). We prove that PL
+j=ℓ+1 ln 1
+vj is likely to be larger than the detection
+threshold (L −ℓ) + λ
+√
+L −ℓ.
+Denote by sj the random variable ln 1
+vj , conditioned on WatO(prompt) = x, or equivalently, on
+the value of xj. Recall that the variable E = ln 1
+u for u ∼U([0, 1]) is exponentially distributed with
+rate 1. In particular, if xj = 1 the variable sj is distributed the same as E conditioned on u ≤pj(1),
+or equivalently on E ≥ln
+1
+pj(1). By the memorylessness property of exponential distributions, hence,
+sj is distributed as ln
+1
+pj(1) + Ej, where Ej is an exponentially distributed random variable with
+rate 1. Symmetrically, if xj = 0 the variable sj is distributed as ln
+1
+pj(0) + Ej. We conclude that
+L
+X
+j=ℓ+1
+sj ∼ln(2) · H[ℓ+1,L]
+e
+(Model, prompt, x) +
+L
+X
+j=ℓ+1
+Ej,
+where the factor of ln(2) comes from the switch to binary entropy. Recall that Watsk ﬁxes r as soon
+as it outputs xℓfor which (x1, . . . , xℓ) has empirical entropy of at least λ. Since each bit, including
+xℓ, has empirical entropy of at most λ, (x1, . . . , xℓ) has empirical entropy at most 2λ ≤
+2
+ln 2λ
+√
+L.
+19
+
+Therefore,
+H[ℓ+1,L]
+e
+(Model, prompt, x) ≥He(Model, prompt, x) −2λ
+≥
+2
+ln 2λ
+√
+L
+≥
+2
+ln 2λ
+√
+L −ℓ.
+Therefore, applying Lemma 2,
+Pr
+
+
+L
+X
+j=ℓ+1
+sℓ≤(L −ℓ) + λ
+√
+L −ℓ
+
+≤Pr
+
+
+L
+X
+j=ℓ+1
+Ej ≤(L −ℓ) −λ
+√
+L −ℓ
+
+
+≤e−λ2/2.
+Theorem 6. W is an undetectable watermarking scheme.
+Proof. Recall Deﬁnition 9, which says that a watermark is undetectable if no eﬃcient adversary
+can distinguish between query access to the watermarked model and the original one. Consider any
+ﬁxed history of responses x(1), . . . , x(t−1), and suppose that the adversary submits prompt as the
+next query. We will show that
+1
+2
+WatO(prompt) −Model(prompt)
+
+1 ≤negl(λ).
+Since the adversary can only make poly(λ) queries, it follows that the entire interaction with WatO
+is statistically indistinguishable from interaction with Model. Finally, we will obtain the theorem
+by invoking Lemma 1.
+Let r(1), . . . , r(t−1) be the preﬁxes of the previous responses x(1), . . . , x(t−1) (as determined on
+Line 9 of Algorithm 3). If for some k ∈[t] the watermarking scheme never collects enough entropy
+to assign a preﬁx r(k), we let r(k) := ⊥. We denote the tokens of x(k) by (x(k)
+1 , . . . , x(k)
+L(k)) where
+L(k) :=
+x(k), and the corresponding probability distributions output by Model with (p(k)
+1 , . . . , p(k)
+L(k)).
+We denote the tokens of r(k) by (r(k)
+1 , . . . , r(k)
+ℓ(k)) where ℓ(k) :=
+r(k).
+Since we have ﬁxed x(1), . . . , x(t−1), observe that the distribution on the next preﬁx r(t) is
+identical between WatO and Model. This is because WatO does not start embedding the watermark
+until after r(t) is completely sampled; until then WatO samples tokens according to Model. Deﬁne
+the set B := {r(1), . . . , r(t−1)} \ {⊥}. For any ﬁxed r(t) ̸∈B, the distribution on the remaining
+tokens (x(t)
+ℓ(t)+1, . . . , x(t)
+L(t)) is also identical between WatO and Model: If r(t) = ⊥, then there are
+no remaining tokens and the statement is trivial; if r(t) ̸∈{r(1), . . . , r(t−1)} then WatO samples the
+remaining tokens with fresh randomness. We will show that Prr(t)[r(t) ∈B] ≤negl(λ), completing
+the proof.
+For k ∈[t −1] and i ∈[L(k)], we deﬁne
+q(k)
+i
+:= Model(prompt, x(k)
+1 , . . . , x(k)
+i−1).
+20
+
+Note that q(k)
+i
+(z) is the probability that x(t)
+i
+= z, given that x(t)
+j
+= x(k)
+j
+for j ∈[i −1]. We compute
+Pr
+r(t)[r(t) ∈B] = Pr
+r(t)[r(t) ∈{r(1), . . . , r(t−1)} and r(t) ̸= x(t)]
+≤
+t−1
+X
+k=1
+Pr
+r(t)[r(t) = r(k) and r(t) ̸= ⊥]
+=
+t−1
+X
+k=1
+1
+
+
+ℓ(k)−1
+X
+i=1
+log
+1
+q(k)
+i
+(x(k)
+i
+)
+< λ ≤
+ℓ(k)
+X
+i=1
+log
+1
+q(k)
+i
+(x(k)
+i
+)
+
+·
+ℓ(k)
+Y
+i=1
+q(k)
+i
+(r(k)
+i
+)
+≤
+t−1
+X
+k=1
+1
+
+λ ≤−log
+ℓ(k)
+Y
+i=1
+q(k)
+i
+(r(k)
+i
+)
+
+·
+ℓ(k)
+Y
+i=1
+q(k)
+i
+(r(k)
+i
+)
+≤(t −1) · 2−λ.
+4.4
+Constructing Substring-Complete Watermarks
+The detector presented in Section 4.3 receieves as an input the entire text output by Watsk. In this
+section we generalize the scheme into a substring-complete one, which is able to detect watermarks
+in any contiguous sequence of text with suﬃciently high empirical entropy.
+The new scheme, described in Algorithms 5 and 6, is essentially a repeated version of Algo-
+rithms 3 and 4. First, it samples naturally from the model until it has collected enough empirical
+entropy. Once we collect λ bits of empirical entropy in a text block r, we start embedding the
+watermark using r as our seed. We continue embedding the watermark in the next subsequence of
+tokens (xi, . . . , xi+ℓ−1) until we have collected enough empirical entropy to know that the watermark
+will be detected with high probability. At this point, we could restart Algorithm 3, sampling the
+next tokens from xj ←pj to generate a new seed r. Instead, we observe that we can in fact use the
+previous subsequence (xi, . . . , xi+ℓ−1) itself as r, as it is of high enough empirical entropy as well.
+We use the same notation as in Section 4.3, except that now W refers to the scheme deﬁned in
+Algorithms 5 and 6.
+Theorem 7. W is a sound watermarking scheme.
+Proof. Up to symbolic diﬀerences, the proof is identical to that of Theorem 4 except that the union
+bound will be over L3 possible values of i, ℓ, k rather than L possible values of i.
+Theorem 8. W is a
+
+8
+ln 2λ
+√
+L
+
+-substring-complete watermarking scheme.
+Proof. We argue that any substring with empirical entropy at least
+8
+ln 2λ
+√
+L must include the entirety
+of a pair of consecutive blocks r(a), r(a+1). We then refer to the proof of Theorem 5 to argue that
+the bias planted in r(a+1) with the seed r(a) can be detected with overwhelming probability.
+Recall the deﬁnition of completeness in Deﬁnition 7. By Lemma 1 it suﬃces to show that for
+every prompt,
+Pr
+O
+x←WatO(prompt)
+h
+∃i, L ∈[|x|] such that Detectsk(x[i : i + L]) = false
+and H[i:i+L]
+e
+(Model, prompt, x) ≥b(L)
+i
+≤negl(λ).
+(3)
+21
+
+Algorithm 5: Substring-complete watermarking algorithm Watsk.
+Data: A prompt (prompt), secret key sk, and parameter λ
+Result: Watermarked text x1, . . . , xL
+1 r ←⊥, H ←0, i ←1, ℓ←0;
+2 while done /∈(x1, . . . , xi−1) do
+3
+pi ←Model(prompt, x1, . . . , xi−1);
+4
+if r = ⊥then
+// Still sampling the first block
+5
+Sample xi ←pi;
+6
+else
+// Embed the watermark
+7
+xi ←
+1[Fsk(r, i) ≤pi(1)];
+8
+H ←H −log pi(xi);
+9
+if H ≥
+2
+ln 2λ
+√
+ℓthen
+// Reassign r
+10
+r ←(xi−ℓ, . . . , xi);
+11
+H ←0, ℓ←0;
+12
+end
+13
+i ←i + 1, ℓ←ℓ+ 1;
+14 end
+Algorithm 6: Substring-complete detector Detectsk.
+Data: Text x1, . . . , xL and a secret key sk
+Result: true or false
+1 for i, ℓ∈[L], ℓ< i do
+2
+r(i,ℓ) ←(xi−ℓ, . . . , xi);
+3
+v(i,ℓ)
+j
+←xj · Fsk(r(i,ℓ), j) + (1 −xj) · (1 −Fsk(r(i,ℓ), j)) for each j ∈[L];
+4
+for k ∈[i + 1, L] do
+5
+if Pk
+j=i+1 ln
+
+1/v(i,ℓ)
+j
+
+> (k −i) + λ
+√
+k −i then
+6
+return true;
+7
+end
+8
+end
+9 end
+10 return false;
+22
+
+where b(L) =
+8
+ln 2λ
+√
+L. We’ll show that for every ﬁxed x ∈T ⋆, i, L ∈[|x|], and prompt such
+that H[i:i+L]
+e
+(Model, prompt, x) ≥
+8
+ln 2λ
+√
+L, if each bit xj of x[i : i + L] has empirical entropy
+Hj
+e(Model, prompt, x) ≤λ,
+Pr
+O
+
+DetectO(x) = false | WatO(prompt) = x
+
+≤negl(λ).
+(4)
+Let x = (xi, . . . xi+L) be such that H[i:i+L]
+e
+(Model, prompt, x) ≥
+8
+ln 2λ
+√
+L and Hj
+e(Model, prompt, x) ≤
+λ for each j ∈[i : i + L]. Let c, d ∈[i : i + L] be such that r(a) := (xc, . . . , xd) is the ﬁrst contiguous
+substring of x[i : i + L] such that r was assigned to r(a) in Line 10 of Algorithm 5. Recall that
+we reassign each seed r as soon as we have collected
+2
+ln 2λ
+√
+ℓempirical entropy where ℓ≤L. So
+x[i : c−1] contains at most
+2
+ln 2λ
+√
+L+λ empirical entropy; otherwise, r(a) would have been assigned
+for a lower starting index. Similarly, r(a) contains at most
+2
+ln 2λ
+√
+L + λ empirical entropy. Let
+r(a+1) = (xd+1, . . . , xk) denote the next block after r(a). Observe that
+H[d+1:i+L]
+e
+(Model, prompt, x) ≥
+8
+ln 2λ
+√
+L −
+4
+ln 2λ
+√
+L −2λ ≥
+2
+ln 2λ
+√
+k −d.
+Therefore, after r(a) has been ﬁxed, there is suﬃcient entropy in the remainder of our substring
+x[d + 1 : i + L] so that r(a+1) will be contained entirely within it. Since r(a+1) has empirical entropy
+at least
+2
+ln 2λ
+√
+k −d, we can now follow the analysis in the proof of Theorem 5 to conclude that this
+choice of c, d, k in the detection algorithm results in an output of true.
+Theorem 9. W is an undetectable watermarking scheme.
+Proof. The proof is similar to Theorem 6, but we index by “blocks” instead of queries. These serve
+the same purpose as the “preﬁxes” of Theorem 6, except that there may be many blocks in any single
+query. We deﬁne a block to be a sequence of tokens xi−ℓ, . . . , xi deﬁning a value of r on Line 10 of
+Algorithm 5. If the last block in a response does not get completed before reaching a done token,
+we assign that block the value ⊥. Over the course of the distinguishing experiment that deﬁnes
+undetectability in Deﬁnition 9, WatO will output some number of blocks in each response. We
+enumerate all blocks r(1), r(2), . . . that WatO outputs during the course of the experiment (across
+all responses).
+Recall Deﬁnition 9, which says that a watermark is undetectable if no eﬃcient adversary can
+distinguish between query access to the watermarked model and the original one. Let RW and RM
+be the distributions over the next block r(t) under WatO and Model, respectively.
+We will prove the following:
+For any ﬁxed history of blocks r(1), . . . , r(t−1), if
+r(t−1) ̸∈{r(1), . . . , r(t−2)} \ {⊥}
+then RW = RM and
+Pr
+r(t)
+h
+r(t) ∈{r(1), . . . , r(t−1)} \ {⊥}
+i
+≤negl(λ).
+(5)
+Inductively, any poly(λ)-many blocks output by WatO are at most negl(λ)-far in statistical distance
+from outputs of Model. Since only poly(λ) blocks can appear in the experiment, the entire interaction
+23
+
+with WatO is statistically indistinguishable from interaction with Model. Finally, we will obtain the
+theorem by invoking Lemma 1.
+Depending on whether t is the ﬁrst block in the response, we reason that RW = RM diﬀerently:
+• If r(t) is the ﬁrst block in the response, then RW = RM because WatO and Model behave
+identically until after the ﬁrst block is sampled.
+• If r(t) is not the ﬁrst block in the response (i.e., r(t−1) is a part of the same response as r(t)),
+then RW = RM because r(t−1) ̸∈{r(1), . . . , r(t−2)} and therefore WatO uses fresh randomness
+to generate r(t). (Note that r(t−1) ̸= ⊥, since the subsequent block r(t) is a part of the same
+response.)
+In either case, once we know that RW = RM, Inequality 5 follows from the exact same argument
+as in the proof of Theorem 6.
+5
+Necessity of Assumptions
+In this section we show that the assumptions we use for our construction are necessary. Informally,
+the two main statements we prove in this section are:
+• Undetectability is possible only against a computationally bounded adversary. That is, using
+a polynomial number of queries and exponential running time we can detect any nontrivial
+watermarking scheme. This is proven in Lemma 4.
+• Undetectability is impossible if outputs of low empirical entropy are watermarked: For any t,
+if a non-negligible fraction of outputs with empirical entropy ≤t are watermarked then we
+can detect the watermark using exp(t) queries and time. This is proven in Theorem 10.
+To warm up, we ﬁrst observe that there exist models that generate text with arbitrarily high
+entropy, and nevertheless in any undetectable watermark only a negligible fraction of outputs can
+be watermarked. Hence, the natural attempt to only consider the model’s entropy is insuﬃcient.
+Lemma 3. For every λ, b, ε > 0 there exists a prompt-independent model Model such that H(Model(∅)) ≥
+b, the maximum length of an output of Model is 1
+εb, and the following holds. If W is any undetectable
+and sound watermarking scheme for Model, then
+Pr
+sk←Setup(1λ)
+x←Watsk(∅)
+[Detectsk (x) = true] ≤ε + negl(λ).
+Proof. We deﬁne the output distribution of Model as follows. With probability 1−ε, Model outputs
+done. Otherwise, it outputs a uniformly random binary string of length 1
+εb. The entropy of Model
+is larger than ε · 1
+εb > b.
+Due to soundness, with high probability (done) is not detected as watermarked, that is
+Pr
+sk←Setup(1λ) [Detectsk ((done)) = true] ≤negl(λ).
+On the other hand, due to undetectability, Watsk(∅) must output (done) with probability (1 −ε) ±
+negl(λ), so the statement of the lemma holds.
+24
+
+Next, we show that computational assumptions are necessary for undetectability of watermarks.
+That is, while we can construct watermarks where the output distributions of Watsk and of Model
+are indistinguishable to any eﬃcient distinguisher, those distributions must not be identical and
+thus a distinguisher with unbounded running time is able to distinguish between them. We prove a
+strong version of this statement: we show that for every model and every watermarking scheme it
+is possible to statistically distinguish Model from Watsk, using a polynomial number of queries from
+any prompt that produces watermarked outputs with non-negligible probability.
+Lemma 4. Let Model be a model and W a watermarking scheme for it that is sound. Let K be an
+upper bound on the size (in bits) of any possible secret key sk for W. Let ε >
+1
+poly(λ) and let prompt
+be a prompt for which
+Pr
+sk←Setup(1λ)
+x←Watsk(prompt)
+[Detectsk(x) = true] ≥ε.
+Then, for randomly chosen sk ←Setup(1λ), it is possible to distinguish between Model and Watsk
+with probability at least 1
+2ε, using poly
+  K
+ε
+
+queries and exp(K) running time.
+Proof. As W is sound, we in particular have that a random output is unlikely to be detected as
+watermarked,
+Pr
+sk←Setup(1λ)
+x←Model(prompt)
+[Detectsk(x) = true] ≤negl(λ).
+Let’s call this property sound on average. As soundness on average and the completeness assumption
+are distributional, we may assume that Detectsk is deterministic by Yao’s minimax principle, while
+maintaining both properties.3 Therefore, for every possible secret key sk there exists a subset Wsk
+of possible outputs such that Detectsk(x) = true if and only if x ∈Wsk.
+As W is sound on average, we have that
+E
+sk←Setup(1λ)
+"
+Pr
+x←Model(prompt)
+[x ∈Wsk]
+#
+=
+Pr
+sk←Setup(1λ)
+x←Model(prompt)
+[Detectsk(x) = true] ≤negl(λ).
+By the completeness assumption, we have
+E
+sk←Setup(1λ)
+
+Pr
+x←Watsk(prompt) [x ∈Wsk]
+
+=
+Pr
+sk←Setup(1λ)
+x←Watsk(prompt)
+[Detectsk(x) = true] ≥ε.
+In particular, due to both assumptions and Markov’s inequality, with probability at least 1−1
+2ε the
+following hold for the drawn secret key sk:
+1. Prx←Model(prompt) [x ∈Wsk] < 1
+2ε2.
+2. Prx←Watsk(prompt) [x ∈Wsk] > ε2.
+3This means that we can always replace Detectsk with a deterministic algorithm that still has those two properties.
+This is done by ﬁxing the randomness used by Detectsk.
+25
+
+Let O be any distribution of strings, and W any set of strings. Let S be set of 10
+ε2 K independent
+strings drawn from O. A Chernoﬀbound yields that
+Pr
+S
+ |S ∩W|
+|S|
+−Pr
+x←O [x ∈W]
+ > 1
+4ε2
+
+≤3−K.
+Given access to two distributions O1, O2, we can draw 10
+ε2 K samples from each, denote them by S1, S2
+respectively, and then compute for every possible key k the quantities |S1∩Wk|
+|S1|
+and |S2∩Wk|
+|S2|
+. Due
+to the Chernoﬀbound above and to a simple union bound, with probability at least 1 −2 · 1.5−K,
+those quantities approximate up to ± 1
+4ε2 the probabilities Prx←Oj [x ∈Wk] for every choice of
+possible key k and j ∈{1, 2}. In that case, if O1 = O2 = Model there will not exist any k for
+which |S1∩Wk|
+|S1|
+< 3
+4ε2 and |S2∩Wk|
+|S1|
+> 3
+4ε2, but if O1 = Model and O2 = Watsk, there would. Thus,
+we can distinguish between those two cases by making 20
+ε2 K queries and enumerating over all 2K
+possible keys.
+An important remark about Lemma 4 is that it requires the size of the secret key to be bounded
+(with respect to the number of queries the distinguisher makes). If we wanted the distributions to be
+indistinguishable only to a much weaker distinguisher that is only allowed to sample each distribution
+once, or a bounded number of times, then we could achieve statistically identical distributions. This
+can be achieved by the construction presented in Section 4, if the PRF is replaced with a long secret
+key containing many random values that will each be used exactly once.
+Finally, we show that any sound watermarking scheme that successfully watermarks outputs
+with empirical entropy smaller than t, is detectable with exp(t) queries and time. This means that
+any watermarking scheme can only work for outputs with empirical entropy that is high enough
+with respect to the time the distinguisher is allowed to spend.
+Theorem 10. Let Model be a model and W a watermarking scheme for it that is sound with respect
+to a security parameter λ. Let t be a parameter, and prompt a prompt for which
+Pr
+sk←Setup
+x←Watsk(prompt)
+[Detectsk(x) = true and He (Model, prompt, x) ≤t] >
+1
+poly(λ).
+Then, it is possible to distinguish between the distributions Watsk and Model with O (exp (t) · poly(λ))
+queries and time, with a non-negligble probability.
+Proof. By making O (exp (t) · poly(λ)) queries to a distribution O we may approximate with accu-
+racy ±10−λ the probability in the distribution O of every output x that has empirical entropy ≤t.
+Note that there are at most 2t such outputs. By Lemma 4 and the assumption, there is a statistical
+diﬀerence between the distributions Model(prompt) and Watsk(prompt), even when we condition
+on the output being of empirical entropy ≤t. Hence, approximating both distributions on all such
+outputs is enough to distinguish between them. Note that unlike in the proof of Lemma 4, we are
+now not enumerating over all possible keys (that may be longer than t or λ), we simply approximate
+both distributions and compute the statistical diﬀerence between them.
+6
+Removing Watermarks
+A natural question is how robust an undetectable watermarking scheme can be to active attempts to
+remove it. While we would ideally like to have an undetectable watermarking scheme that is robust
+26
+
+to any eﬃcient adversary attempting to remove a watermark, there are both practical and theoretical
+barriers to achieving this property. In Section 6.1 we ﬁrst describe several attacks that work well
+at removing watermarks in practice. Then in Section 6.2 we present an (expensive) attack that
+provably removes a watermark from any undetectable scheme. We conclude that no undetectable
+watermarking scheme can be completely unremovable.
+Still, it might require signiﬁcantly more
+resources for a user to generate unwatermarked text from the model.
+6.1
+Empirical Attacks on Watermarking Schemes
+We highlight some relevant practical attacks, described for an attacker wishing to generate an
+unwatermarked response to a prompt prompt. [KGW+23] gives a nice overview of practical attacks
+removing watermarks, including a few of those mentioned here.
+Emoji attack.
+In the “emoji attack,” the attacker asks the model to output a response to prompt
+with an emoji inserted between every pair of words.4
+The attacker then removes the emojis to
+obtain the desired response. This attack removes any watermark that relies on the detector seeing
+consecutive sequences of tokens, including ours as well as those of [KGW+23] and [Aar22].
+In
+general this attack may not preserve the output distribution, but any provable robustness guarantee
+for contiguous-text watermarks would have to rest on the dubious assumption that it doesn’t.
+Translation attack.
+The attacker can ask the model to write in a diﬀerent language, and then
+translate the response to their language of choice. Depending on the ﬂuency of the model in the
+other language, and the quality of the translation tool, this attack may signiﬁcantly degrade the
+quality of text.
+Paraphrasing and substitution attacks.
+The attacker obtains a response from the model. In
+the substitution attack, the attacker replaces some words with their synonyms. In the paraphrasing
+attack, the attacker paraphrases the text either manually or using a model as in [KSK+23] or the
+span replacement attack of [KGW+23]. Depending on how many words are changed, these attacks
+might remove the watermark from our scheme and those of [KGW+23, Aar22]. Of course, changing
+more of the text also increases the risk of degrading its quality.
+Post-hoc attacks.
+For post-hoc detection schemes, there are two simple attacks that are empir-
+ically quite eﬀective at evading detection. First, current LLMs are so powerful that they are often
+capable of simply evading detection themselves if you ask them to: See, for instance, this Reddit
+post.5 Second, in some models, e.g. OpenAI’s “Playground”, one can change model parameters. By
+increasing the temperature, frequency penalty, and presence penalty, one can often produce text
+that evades post-hoc detection.
+6.2
+Removing any Undetectable Watermark
+In this section, we describe an attack that removes a watermark from any undetectable watermarking
+scheme, assuming that the model is “preﬁx-speciﬁable.” The attack is simple: Just sample tokens
+from the watermarked model one at a time.
+4https://twitter.com/goodside/status/1610682909647671306
+5https://www.reddit.com/r/ChatGPT/comments/11pqmqm/you_can_ask_chat_gpt_to_write_a_text_than_alter/.
+27
+
+We say that a model is preﬁx-speciﬁable if the user can specify a preﬁx of the model’s response.
+More formally, we require that for any prompt and text x1, . . . , xk, the user can eﬃciently compute
+a new prompt prompt′ such that Model(prompt′) is distributed identically to Model(prompt)
+conditioned on the response’s preﬁx matching (x1, . . . , xk). This property is also assumed in the
+deﬁnition of a language model in [KGW+23].
+On preﬁx-speciﬁable models.
+Any language model according to Deﬁnitions 1 and 2 can be
+given a preﬁx-speciﬁable interface, but real-world user interfaces may or may not allow it. For
+instance, ChatGPT does not allow the user to specify preﬁxes of the response, but the OpenAI
+Playground allows the user to submit text under the “Assistant” role which the model will use as
+a preﬁx for its next response. We do not know for certain if the resulting distribution is actually
+identical to the model’s response conditioned on the given preﬁx.
+We note that a user can always attempt to “trick” a model into being preﬁx-speciﬁable: Simply
+include in the prompt a request to start the response with the given preﬁx. We also note that when
+we are deﬁning a model, we can always design it to be “preﬁx-speciﬁable” by forcing it to follow such
+requests. In particular, a watermarking scheme that works for every model would need to work also
+for preﬁx-speciﬁable models.
+Theorem 11. Let W = (Setup, Watsk, Detectsk) be any undetectable watermarking scheme. As-
+sume that the underlying model Model is preﬁx-speciﬁable. Then there exists an eﬃcient algorithm
+A making queries to Watsk such that, for any prompt and a random sk ←Setup(1λ), the distribu-
+tions AWatsk(prompt) and Model(prompt) are negl(λ)-close in statistical distance. The number
+of queries made by A to Watsk is exactly the length of text output by A.
+Proof. The attacker generates an unwatermarked response to prompt as follows. It lets y1 be the
+ﬁrst token of Watsk(prompt). It then lets y2 be the ﬁrst token of Watsk(prompt, y1), and so on,
+in general computing yj as the ﬁrst token in Watsk(prompt, y1, . . . , yj−1) until yj = done.
+Let Y = (Y1, . . . , YLY ) be random variables denoting the attacker’s output. Let X = (X1, . . . , XLX)
+be random variables denoting the output of Model(prompt); note that LY and LX are random
+variables here.
+We argue that for each i, ∆((Yi | Yj = yj ∀j < i), (Xi | Xj = yj∀j < i)) ≤negl(λ). Sup-
+pose for the sake of contradiction that the total variation distance between these distributions for
+some i is at least
+1
+poly(λ) for some polynomial poly. A distinguisher trying to determine whether
+it has oracle access to Model or Watsk can make O(poly(|T |) · λ) queries to the oracle with input
+prompt, (x1, . . . , xi−1), and approximate the distribution of the ﬁrst token in the response up to
+additive error ±10−λ in total variation distance. Since 10−λ << 1/poly(λ), this contradicts the
+undetectability of Watsk.
+This tells us that for any partial response (x1, . . . , xi) to prompt, the distribution of the next
+token must have negl(λ) total variation distance from that of the unwatermarked model. Therefore,
+the entire response produced by this attack using the watermarked model must be have negligible
+total variation distance from the unwatermarked model.
+By soundness, the watermark cannot be detected in the output of A with non-negligible proba-
+bility. Therefore, this attack succeeds in removing the watermark.
+Fortunately, for reasonable text sizes this attack is probably impractical. For instance, while
+generating an 8, 000-token response from GPT-4 currently costs $0.06
+1000 × 8000 = $0.48, generating
+28
+
+the same text using the above attack would cost $0.48 + $0.03
+1000 × 8000 × 7999/2 = $960.36. (Current
+GPT-4 pricing is $0.03 per 1000 prompt tokens and $0.06 per 1000 sampled tokens.) Still, it shows
+that we cannot hope to achieve an overly sweeping deﬁnition of completeness/unremovability; it
+cannot allow an adversary powerful enough to run this attack.
+7
+Open Problems
+Section 6 implies that undetectable watermarking schemes cannot be made “unremovable” in a
+general sense. Nevertheless, it is intriguing to ﬁnd the most general sense in which undetectable
+watermarks can be made robust to removal attempts. For example, our construction of substring-
+complete watermarks guarantees detection as long as a consecutive substring of the output with
+high enough empirical entropy remains intact. Can this property be generalized to non-consecutive
+subsets of the output? Are there larger classes of removal techniques against which undetectable
+watermarks can be made robust?
+Quantitatively, our main schemes in Section 4 might not achieve an optimal completeness pa-
+rameter. The simpliﬁed scheme we present in Section 3 achieves completeness with a parameter
+that only depends on λ, but not soundness or worst-case polynomial runtime. Our full construction
+in Section 5, on the other hand, achieves all required properties yet has a possibly non-optimal
+Θ
+
+λ
+√
+L
+
+completeness parameter.
+Can we close this gap, either by improving our scheme to require less entropy for detection, or
+by showing a stronger lower bound for schemes that are sound (or eﬃcient)?
+Acknowledgments
+This research was supported in part by NSF Grants CCF-2107187, CCF-1763970, and CCF-2212233,
+by JPMorgan Chase & Co, by LexisNexis Risk Solutions, and by the Algorand Centres of Excel-
+lence programme managed by Algorand Foundation. Any opinions, ﬁndings, and conclusions or
+recommendations expressed in this material are solely those of the authors.
+References
+[Aar22]
+Scott
+Aaronson.
+My
+AI
+Safety
+Lecture
+for
+UT
+Eﬀective
+Altruism.
+https://scottaaronson.blog/?p=6823,
+November
+2022.
+Accessed
+May
+2023.
+5, 27
+[AF21]
+Sahar Abdelnabi and Mario Fritz.
+Adversarial watermarking transformer: Towards
+tracing text provenance with data hiding. In 2021 IEEE Symposium on Security and
+Privacy (SP), pages 121–140. IEEE, 2021. 4
+[ARC+01]
+Mikhail J Atallah, Victor Raskin, Michael Crogan, Christian Hempelmann, Florian Ker-
+schbaum, Dina Mohamed, and Sanket Naik. Natural language watermarking: Design,
+analysis, and a proof-of-concept implementation. In Information Hiding: 4th Interna-
+tional Workshop, IH 2001 Pittsburgh, PA, USA, April 25–27, 2001 Proceedings 4, pages
+185–200. Springer, 2001. 6
+29
+
+[ARH+03]
+Mikhail J Atallah, Victor Raskin, Christian F Hempelmann, Mercan Karahan, Radu
+Sion, Umut Topkara, and Katrina E Triezenberg. Natural language watermarking and
+tamperprooﬁng.
+In Information Hiding: 5th International Workshop, IH 2002 No-
+ordwijkerhout, The Netherlands, October 7-9, 2002 Revised Papers 5, pages 196–212.
+Springer, 2003. 6
+[Ber16]
+Daria Beresneva. Computer-generated text detection using machine learning: A sys-
+tematic review. In Natural Language Processing and Information Systems: 21st In-
+ternational Conference on Applications of Natural Language to Information Systems,
+NLDB 2016, Salford, UK, June 22-24, 2016, Proceedings 21, pages 421–426. Springer,
+2016. 4
+[CBZ+23]
+Souradip Chakraborty, Amrit Singh Bedi, Sicheng Zhu, Bang An, Dinesh Manocha,
+and Furong Huang. On the possibilities of ai-generated text detection. arXiv preprint
+arXiv:2304.04736, 2023. 4
+[DIRR09]
+Nenad Dedić, Gene Itkis, Leonid Reyzin, and Scott Russell. Upper and lower bounds
+on black-box steganography. Journal of Cryptology, 22:365–394, 2009. 5
+[Fow23]
+Geoﬀrey A. Fowler. We tested a new chatgpt-detector for teachers. it ﬂagged an innocent
+student. The Washington Post, April 2023. 3
+[GGM86]
+Oded Goldreich, ShaﬁGoldwasser, and Silvio Micali. How to construct random func-
+tions. Journal of the ACM (JACM), 33(4):792–807, 1986. 6
+[GKVZ22]
+ShaﬁGoldwasser, Michael P Kim, Vinod Vaikuntanathan, and Or Zamir.
+Planting
+undetectable backdoors in machine learning models. In 2022 IEEE 63rd Annual Sym-
+posium on Foundations of Computer Science (FOCS), pages 931–942. IEEE, 2022. 6
+[GSR19]
+Sebastian Gehrmann, Hendrik Strobelt, and Alexander M Rush. Gltr: Statistical de-
+tection and visualization of generated text.
+arXiv preprint arXiv:1906.04043, 2019.
+4
+[HILL99]
+Johan Håstad, Russell Impagliazzo, Leonid A Levin, and Michael Luby. A pseudoran-
+dom generator from any one-way function. SIAM Journal on Computing, 28(4):1364–
+1396, 1999. 6
+[HMW07]
+Nicholas Hopper, David Molnar, and David Wagner. From weak to strong watermark-
+ing. In Theory of Cryptography: 4th Theory of Cryptography Conference, TCC 2007,
+Amsterdam, The Netherlands, February 21-24, 2007. Proceedings 4, pages 362–382.
+Springer, 2007. 6
+[HvAL09]
+Nicholas J. Hopper, Luis von Ahn, and John Langford. Provably secure steganography.
+IEEE Trans. Computers, 58(5):662–676, 2009. 5, 13
+[JAML20]
+Ganesh Jawahar, Muhammad Abdul-Mageed, and Laks VS Lakshmanan. Automatic
+detection of machine generated text: A critical survey. arXiv preprint arXiv:2011.01314,
+2020. 4
+30
+
+[Jan18]
+Svante Janson. Tail bounds for sums of geometric and exponential variables. Statistics
+& Probability Letters, 135:1–6, 2018. 17, 18
+[Jim23]
+Kayla Jimenez. Professors are using chatgpt detector tools to accuse students of cheat-
+ing. but what if the software is wrong? USA Today, April 2023. 3
+[KAAL23]
+Jan
+Hendrik
+Kirchner,
+Lama
+Ahmad,
+Scott
+Aaronson,
+and
+Jan
+Leike.
+New
+ai
+classiﬁer
+for
+indicating
+ai-written
+text.
+https://openai.com/blog/new-ai-classifier-for-indicating-ai-written-text,
+January 2023. Accessed May 2023. 4
+[KGW+23] John Kirchenbauer, Jonas Geiping, Yuxin Wen, Jonathan Katz, Ian Miers, and Tom
+Goldstein. A watermark for large language models. CoRR, abs/2301.10226, 2023. 3, 4,
+5, 7, 13, 27, 28
+[KJGR21]
+Gabriel Kaptchuk, Tushar M. Jois, Matthew Green, and Aviel D. Rubin.
+Meteor:
+Cryptographically secure steganography for realistic distributions. In Yongdae Kim,
+Jong Kim, Giovanni Vigna, and Elaine Shi, editors, CCS ’21: 2021 ACM SIGSAC
+Conference on Computer and Communications Security, Virtual Event, Republic of
+Korea, November 15 - 19, 2021, pages 1529–1548. ACM, 2021. 5
+[KSK+23]
+Kalpesh Krishna, Yixiao Song, Marzena Karpinska, John Wieting, and Mohit Iyyer.
+Paraphrasing evades detectors of ai-generated text, but retrieval is an eﬀective defense.
+arXiv preprint arXiv:2303.13408, 2023. 4, 27
+[LUY08]
+Thomas Lavergne, Tanguy Urvoy, and François Yvon.
+Detecting fake content with
+relative entropy scoring. PAN, 8:27–31, 2008. 4
+[LYM+23]
+Weixin Liang, Mert Yuksekgonul, Yining Mao, Eric Wu, and James Zou. Gpt detectors
+are biased against non-native english writers. arXiv preprint arXiv:2304.02819, 2023. 4
+[MLK+23] Eric Mitchell, Yoonho Lee, Alexander Khazatsky, Christopher D. Manning, and Chelsea
+Finn. Detectgpt: Zero-shot machine-generated text detection using probability curva-
+ture. CoRR, abs/2301.11305, 2023. 4
+[MZ23]
+Travis Munyer and Xin Zhong. Deeptextmark: Deep learning based text watermarking
+for detection of large language model generated text. arXiv preprint arXiv:2305.05773,
+2023. 4
+[Ope23]
+OpenAI. tiktoken repository. https://github.com/openai/tiktoken, 2023. Accessed
+April 2023. 13
+[QZL+23]
+Jipeng Qiang, Shiyu Zhu, Yun Li, Yi Zhu, Yunhao Yuan, and Xindong Wu. Natural lan-
+guage watermarking via paraphraser-based lexical substitution. Artiﬁcial Intelligence,
+page 103859, 2023. 4
+[SKB+23]
+Vinu Sankar Sadasivan, Aounon Kumar, Sriram Balasubramanian, Wenxiao Wang, and
+Soheil Feizi. Can ai-generated text be reliably detected? CoRR, abs/2303.11156, 2023.
+4
+31
+
+[Tia23]
+Edward Tian. gptzero update v1. https://gptzero.substack.com/p/gptzero-update-v1,
+January 2023. Accessed May 2023. 3, 4
+[YAJK23]
+KiYoon Yoo, Wonhyuk Ahn, Jiho Jang, and Nojun Kwak. Robust natural language
+watermarking through invariant features. arXiv preprint arXiv:2305.01904, 2023. 4
+[ZHR+19]
+Rowan Zellers, Ari Holtzman, Hannah Rashkin, Yonatan Bisk, Ali Farhadi, Franziska
+Roesner, and Yejin Choi.
+Defending against neural fake news.
+Advances in neural
+information processing systems, 32, 2019. 4
+32

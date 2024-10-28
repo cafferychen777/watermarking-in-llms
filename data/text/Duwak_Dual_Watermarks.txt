@@ -1,0 +1,2188 @@
+Duwak: Dual Watermarks in Large Language Models
+Chaoyi Zhu
+TU Delft,
+Delft, Netherlands
+c.zhu-2@tudelft.nl
+Jeroen Galjaard
+TU Delft,
+Delft, Netherlands
+J.M.Galjaard@tudelft.nl
+Pin-Yu Chen
+IBM Research,
+New York, USA
+pin-yu.chen@ibm.com
+Lydia Y. Chen
+TU Delft,
+Delft, Netherlands
+lydiaychen@ieee.org
+Abstract
+As large language models (LLM) are increas-
+ingly used for text generation tasks, it is criti-
+cal to audit their usages, govern their applica-
+tions, and mitigate their potential harms. Ex-
+isting watermark techniques are shown effec-
+tive in embedding single human-imperceptible
+and machine-detectable patterns without sig-
+nificantly affecting generated text quality and
+semantics. However, the efficiency in detect-
+ing watermarks, i.e., the minimum number of
+tokens required to assert detection with sig-
+nificance and robustness against post-editing,
+is still debatable. In this paper, we propose,
+Duwak, to fundamentally enhance the effi-
+ciency and quality of watermarking by em-
+bedding dual secret patterns in both token
+probability distribution and sampling schemes.
+To mitigate expression degradation caused by
+biasing toward specific tokens, we design a
+contrastive search to watermark the sampling
+scheme, which minimizes the token repetition
+and enhances the diversity. We theoretically
+explain the interdependency of the two water-
+marks within Duwak. We evaluate Duwak ex-
+tensively on Llama2 and Vicuna under various
+post-editing attacks, against four state-of-the-
+art watermarking techniques and combinations
+of them. Our results show that Duwak marked
+text achieves the highest watermarked text qual-
+ity at the lowest required token count for de-
+tection, up to 70% tokens less than existing
+approaches, especially under post paraphrasing.
+Our code is available at https://github.
+com/chaoyitud/Dual-Watermarks.
+1
+Introduction
+Large language models (LLMs) are widely adapted
+for natural language tasks, including copywrit-
+ing (OpenAI, 2022), machine-translation (Zhang
+et al., 2023), questioning and answering (Tou-
+vron et al., 2023a), and code generation (Rozière
+et al., 2023). While LLMs achieve remarkable
+and human-like performance, there are increasing
+risks of abusing LLM’s (Kuditipudi et al., 2023)
+to produce incorrect and adversarial content on so-
+cial media and to commit fraud in academic rights.
+Watermarking LLM content is one of the essen-
+tial solutions to govern the LLM applications and
+guardrail their misuse and harm to the society, even
+requested by the governmental policies (Veale and
+Zuiderveen Borgesius, 2021). Much like physi-
+cal watermarks, embedding watermark signals on
+LLM-generated text provides the means to trace
+content to their generator as well as the LLM mod-
+els that constantly evolve.
+Key criteria for watermarking generative lan-
+guage models are multiple folds: having minimal
+degradation of the generated content quality, im-
+perceptible to humans for avoiding alteration, de-
+tectable by machines for rigorous auditing, and ro-
+bust against post-text editing. Recent studies show
+that a single watermark pattern can be hidden in
+generated text through either altering the underly-
+ing token probability distribution (Kirchenbauer
+et al., 2023a; Yoo et al., 2023; Fernandez et al.,
+2023) or modifying the sampling strategy (Kudi-
+tipudi et al., 2023; Christ et al., 2023; Aaronson,
+2022). While the existing watermarks achieve mul-
+tiple criteria, their practicability on short texts and
+post-edited text is limited, as the minimum number
+of tokens required for successful detection, e.g.,
+low false positive rate, under those scenarios is
+high.
+In this paper, we propose a dual watermarking
+approach, Duwak, which improves the watermark
+detection efficiency and text quality by embed-
+ding two independent secret patterns into the to-
+ken probability distribution and sampling scheme.
+To detect the watermark, Duwak searches for the
+union of these two watermarks—the enabler for
+efficient detection with a low token count. Under
+Duwak, we first modify the pre-activation logits
+of pseudo-randomly selected tokens seeded by a
+function (i.e., hash) of a prior token sequence and
+arXiv:2403.13000v2  [cs.LG]  8 Aug 2024
+
+𝒙𝒕?
+𝒍𝒕
+𝟏
+𝒍𝒕
+𝟐
+𝒍𝒕
+𝟑
+….
+𝒍𝒏
+|𝒗|
+Hashing
+Generate
+𝒉
+𝒍𝒕𝟏
+𝒍𝒕𝟐
+𝒍𝒕𝟑
+….
+𝒍𝒏
+|𝒗|
+Sampling: 
+Contrastive
+Search
+Logit modification
+1
+𝒙𝒕
+|𝒗|
+LLM
+𝒙𝒕(𝒉
+…
+𝒙𝒕(𝟐𝒙𝒕(𝟏
+RNG
+2
+𝜘!"
+𝜘#$
+Figure 1: Duwak: dual watermarking LLMs. To generate a token xt, Duwak embeds two secret patterns, governed
+by random number generation seeded by two private keys and prior tokens, via (i) pre-activation logit modification
+and (2) a contrastive search sampling strategy.
+a secret key, similar to green-red list watermark-
+ing approaches (Kirchenbauer et al., 2023a; Yoo
+et al., 2023; Wang et al., 2023b; Zhao et al., 2023).
+Consecutively, we randomly split the token into the
+normal and watermark sampling set, which embeds
+an additional random number sequence seeded by
+a second secret key.
+The challenge lies in efficiently detecting water-
+marks without degrading quality. It is known that
+watermarking activation signals inevitably degrade
+the text quality due to the bias term on a pseudo-
+random selection of tokens (Welleck et al., 2020;
+Kuditipudi et al., 2023). To counteract this degra-
+dation, we advocate the use of a quality aware sam-
+pling scheme—the contrastive search, which limits
+token sampling to top-k tokens resulting in the low-
+est similarity w.r.t. previous generated tokens. Un-
+like the popular cryptographic sampling, the con-
+trastive search marks sampling patterns, thereby
+improving the text expression, improving the diver-
+sity of token selection and thus the watermarked
+text quality (Ren et al., 2023; Liu et al., 2023).
+Our contributions are summarized in the follow-
+ing:
+Improving
+watermark
+efficiency,
+through
+Duwak’s joint dual watermarks patterns in the
+token
+probability
+distribution
+and
+sampling
+scheme.
+Increasing generation diversity and robust-
+ness, by avoiding expression degradation of
+watermarked text.
+Duwak includes a novel
+quality-aware sampling scheme based on the
+contrastive search.
+Empirical evaluation showing the effectiveness
+of Duwak against existing watermark solutions un-
+der nine post-editing attacks. Thereby showing the
+minimum number of tokens required to reach detec-
+tion accuracy is up to 70% lower than related work,
+with nearly the best text quality and diversity.
+2
+Background
+LLM text synthesis Large language models are
+typically transformer-based neural networks, de-
+noted by M and parameterized by θ. Internally,
+these models tokenize the vocabulary into a set,
+V, and generate a token sequence indexed by i,
+xi≥0, based on the prompt text, which is repre-
+sented as a token sequence with negative index
+xi<0. Generally, generative LLMs ‘complete’ a
+provided sequence (prompt) in an auto-regressive
+fashion, i.e., the token of t-th position is based on
+the prompt and thus far generated tokens, i.e., to-
+kens xi<t, from here on notated simplified as x<t.
+The token generation consists of two stages. First,
+the LLM estimates the probability scores of the
+succeeding token xn
+t for all |V| tokens at the posi-
+tion t, ∀n ∈V by softmaxing the model’s output
+logits, ln
+t = lθ (· | x<t)n,
+pθ(·|x<t)n = softmax(lt)n, ∀n ∈V.
+The second step is to sample the token based
+on the estimated probability distribution. Com-
+mon sampling schemes differ in their objectives
+and complexity: greedy search, beam-search, top-
+k sampling (Fan et al., 2018a), nucleus-sampling
+(top-p) (Holtzman et al., 2020), multinomial (ran-
+dom) sampling, and contrastive search (Su et al.,
+2022).
+Watermarking LLM Watermarks are typically
+embedded in the process of next-token genera-
+tion through altering: (i) the logit and probability
+(Kirchenbauer et al., 2023a; Yoo et al., 2023; Lee
+et al., 2023a) and (ii) the sampling scheme (Aaron-
+son, 2022; Christ et al., 2023; Kuditipudi et al.,
+2023). To change the probability distribution, the
+key idea is to split the vocabulary tokens into a
+green (preferred) and red list, V ∈G ∪R, via a
+random number that is hashed from a secret key
+and an aggregate of previous h tokens. The number
+
+of green tokens is controlled by hyper-parameter
+γ by taking |G| = γ|V|. The logit values of green
+tokens receive a bias δ, thereby increasing their
+probability estimates, thus increasing the likeli-
+hood of them being selected. The sampling scheme
+can remain the same as the original LLM. Conse-
+quently, watermarked text is expected to have an
+increase in the number of green tokens. In con-
+trast, sampling-based approaches are determinis-
+tic while keeping the model’s next token proba-
+bility estimate untouched. Aaronson (2022) pro-
+pose an exponential scheme and choose the token
+xt = arg maxn∈V
+n
+(rn)
+1
+pn o
+, where p is the un-
+altered probability vector and r ∈[0, 1]|V|, is the
+random number vector generated by hashing the
+prior h tokens and the secret key.
+Detecting Watermarking Detecting water-
+marks requires inspecting a sequence of N tokens
+and computing their watermark likelihood score,
+SN. The exact score computation depends on wa-
+termarking methods. In the case of logit modifica-
+tion through the green-red list (Kirchenbauer et al.,
+2023a), every token is classified into the green or
+red list based on the random split, conditioned on
+the random number sequence seeded by prior to-
+kens and secret key. The total number of green
+tokens is the score. As for the sampling approach,
+e.g., Aaronson (2022), computes a pre-determined
+threshold is exceeded by negative summation of
+P
+i∈N ln(1 −ri). Here the intuition lies in the fact
+that a token with low pi would require an ri arbi-
+trarily close to 1, thus limiting their contribution to
+the computed score. This metric essentially mea-
+sures the aggregate deviation from the expected
+distribution of tokens under the manipulation of
+random number vector r.
+Watermarking Measures There are multiple
+measures for watermarking algorithms: text qual-
+ity, detection efficiency, and robustness. In terms
+of quality, perplexity (Kirchenbauer et al., 2023a;
+Wang et al., 2023a; Kuditipudi et al., 2023) metrics,
+rating from another (larger) LLM (Kocmi and Fed-
+ermann, 2023; Piet et al., 2023), and diversity (Su
+et al., 2022; Kirchenbauer et al., 2023b) are used
+to assess the (watermarked) LLM text. As for de-
+tection efficiency and robustness, it measures the
+number of N tokens needed to achieve significant
+detection tests under differentattacks, e.g., inser-
+tion, deletion, and paraphrasing (Piet et al., 2023).
+Z-statistic and p-value (Kirchenbauer et al.,
+2023a) are commonly used to evaluate the signifi-
+cance of the detection test, assuming the detection
+scores follow the normal distribution with a mean
+of µ and standard deviation of σ. The null hypoth-
+esis of the detection test is that H0: the text is
+unwatermarked. The Z-statistics represents the nor-
+malized observed score value, which is subtracted
+by the estimated mean and standard deviation. And,
+its corresponding p-value represents the probability
+of having a normalized score higher than observed
+Z under the H0, i.e., the text is not watermarked.
+3
+Duwak: Dual Watermarking
+The objective of Duwak is to maintain the water-
+marked text quality while keeping high detection
+efficiency, i.e., high detection confidence by in-
+specting a low number of tokens. Duwak embeds
+two secret watermark signals sequentially in the
+token probability distribution and token sampling
+scheme as shown in Fig. 1. To mitigate the text dis-
+tortion caused by modifying the token probability,
+we design a contrastive search sampling scheme
+that increases the diversity via selecting tokens with
+low similarity among the top-k ones. We elucidate
+the interdependency through the joint watermark-
+ing scheme of Duwak, demonstrating that the two
+watermarks can be integrated efficiently with an
+efficiency guarantee.
+3.1
+Token Probability Watermark
+To generate token xt from a given prompt and prior
+generated token sequence, Duwak first alters the
+token probability distribution pt →ˆpt by altering
+the logit values for a subset of n ∈V. Specifi-
+cally, a secret key κtp and the prior sequence of
+window h, i.e., xt−h≤t≤t−1, are inputs to a pseudo-
+random number generator, RNG, for generating
+a fixed-length pseudo-random number sequence.
+Consecutively, each random number is used to split
+the token into binary types, i.e., green v.s. red. Gen-
+erally, the secret keys used during watermarking
+are only known to the owner. Such a design guaran-
+tees that only the watermark owner can identify and
+decode the watermarked tokens, embedding a layer
+of security and specificity within the generated text.
+Following (Kirchenbauer et al., 2023a), a bias term,
+δ, is added to the logit of tokens on the favored
+list, termed green list, while keeping logits of non-
+biased tokens, coined red list, remains unchanged.
+As the token probability distribution is computed as
+taking the softmax function on the logit, shown in
+Eq. 1, the token probability distribution is thus mod-
+
+ified, risking text quality degradation. The higher
+the δ value, the higher the distortion to the proba-
+bility and thus higher the possibilityof degradation
+in text quality. We note that Duwak is compati-
+ble with any probability modification proposed in
+existing watermarking algorithms, and we, in prac-
+tice, adopt the algorithms derived in (Kirchenbauer
+et al., 2023b). More specifically, defining pn
+t as,
+ˆpn
+t =
+exp
+ ln + 1
+
+n ∈G
+
+δ
+
+P
+i∈V exp
+ li + 1
+
+i ∈G
+
+δ
+
+(1)
+where 1[c] is 1 when c holds, otherwise 0.
+3.2
+Contrastive Search Watermark
+One of the known limitations of LLM is anisotropic
+representation—repetitive wording and degener-
+ated expression (Ethayarajh, 2019; Su et al., 2022;
+Su and Collier, 2023). To avoid such degradation,
+(Su and Collier, 2023) define a self-similarity mea-
+sure of token xt with respect to all other tokens in
+the vocabulary V, i.e., xj∈V \{i}. A higher value of
+self-similarity suggests a more isotropic represen-
+tation space. To address the isotropic degradation,
+the token is then sampled to maximize the sum-
+mation of the weighted token probability and the
+penalty of self-similarity.
+We adapt such a contrastive search principle into
+a watermark sampling scheme in a sliding window
+manner. This approach not only incorporates a dis-
+tinctive sampling scheme but also significantly en-
+hances the diversity of text generation. Effectively
+reducing token repetition and mitigating text degen-
+eration, leading to more coherent and varied output.
+Here, token at position t, are split into two sets,
+(i) C with a probability η, subject to contrastive
+search sampling, and (ii) C with a probability 1−η,
+where standard multinomial sampling is applied.
+The segmentation into C and C is facilitated by a
+pseudo-random number generator that leverages a
+hashing value of previous tokens and a watermark
+key, κcs.
+Contrastive searching sampling aims to reduce
+the similarity to the prior L token sequence. For all
+the contrastive set, we limit the selection to the top-
+k tokens, i.e., V (k)
+t
+, with the highest kth probability.
+The top-k sampling is designed to reduce the risk
+that unlikely tokens are sampled (Fan et al., 2018b),
+reducing the search space of contrastive search. We
+then choose a token, v ∈V (k)
+t
+that maximizes the
+weighted probability and minimizes self-similarity
+with respect to the prior L tokens.
+We first define the similarity between xt and
+xt−L≤j<t as the cosine distance between their hid-
+den state, s
+ hxt, hxj
+
+= cos(hxi, hxj), where hxi
+and hxj represent the last layer hidden states in
+the model of token xi and xj respectively, and cos
+is the cosine-similarity between embeddings. Ex-
+tending it to the L window, the self-similarity of
+xt is computed as the maximum value with respect
+to all L prior tokens, xt−L≤j<t, i.e., sL(xt) =
+maxt−L≤j<t
+
+s
+ hxt, hxj
+	
+.
+A sliding window L increases generation effi-
+ciency by limiting the similarity computation to
+L preceding tokens. Moreover, it increases ro-
+bustness against attacks by limiting the context
+on which the watermark is conditioned. The token
+is finally chosen by maximizing the weighted prob-
+ability, ˆpv
+t and similarity penalty, ·sL(xv
+t ), where α
+is a hyper-parameter that balances the importance
+of the weighted probability of the token against its
+self-similarity penalty.
+xt = arg max
+v∈V(k)
+n
+(1 −α) · ˆpv
+t −α · sL(xv
+t )
+o
+(2)
+Algorithm 1 Duwak Token Generation.
+Input: θ, κtp, κcs
+Params: RNG, k, L, Hash, η, sL
+Output: xt ∈V
+1: function DUWAKGENERATE
+2:
+seed ←hash(x<t)
+3:
+r ←RNG(seed, κcs)
+4:
+procedure TOKENPROBWATERMARK
+5:
+G ←RNG(seed, κtp)
+6:
+Compute ˆpn
+t as Eq. 1
+7:
+procedure CSWATERMARK
+8:
+if r < η then
+9:
+V(k)
+t
+←topk(ˆpt)
+10:
+Contrastive search as Eq. 2
+11:
+else
+12:
+xt ∼Multinomial(ˆpt)
+13:
+return xt
+3.3
+Detection in Duwak
+To detect the watermarks within a text sequence x
+of length T, we employ hypothesis testing to differ-
+entiate between the null-hypothesis H0: “the text is
+generated naturally” and the alternative hypothesis
+H1: “the text is generated with Duwak.”
+Given the incorporation of two distinct water-
+marks, we treat the detection of each as two
+
+Algorithm 2 Duwak Watermark Detection.
+Input: θ, κtp, κcs
+Params: γ, T, η, M, L
+Output: p-value ∈[0, 1)
+1: function DUWAKDETECTION
+2:
+procedure COMPUTE_Ptp
+3:
+ϕtp ←PT
+t=1 1
+
+xt ∈Gt
+
+4:
+ztp =
+ϕtp−γT
+√
+Tγ(1−γ)
+5:
+Ptp = 1 −Φ(ztp)
+6:
+procedure COMPUTE_Pcs
+7:
+Pcs ←1
+8:
+for κm ∈{κm | κm ̸= κcs}M
+i=m do
+9:
+Pcs ←Pcs + 1
+
+ϕ(κm)
+cs
+≥ϕ(κcs)
+cs
+
+10:
+Pcs ←
+1
+1+M Pcs
+11:
+P ←1 −Fχ2(x, 4)
+where
+x =
+−2(ln(Ptp) + ln(Pcs))
+12:
+return P
+separate and independent tests. We first detect
+token probability and constrastive search water-
+mark independently and compute their p-values,
+namely, Ptp and Pcs, against the full hypothesis
+that the text is not altered by token probability
+(constrastive search) watermark. We then apply
+Fisher’s method (Fisher, 1922) to that combining
+p-values from these two independent tests into a
+single statistic follows a chi-square (χ2) distribu-
+tion with d = 4 degrees of freedom:
+−2(ln(Ptp) + ln(Pcs)) ∼χ2(4).
+Furthermore, the resulting p-value P, derived from
+the chi-square distribution, is given as:
+P = 1 −Fχ2 (−2 (ln(Pkgw) + ln(Pcs)) , 4) ,
+where Fχ2 is the cumulative distribution function
+(cdf) for the chi-square distribution. This provides
+a unified statistical measure to assess the presence
+of watermarks in the text.
+To compute the p-values for both watermarks,
+we resort to a concept of score, ϕ, which repre-
+sents the discernible discrepancy between water-
+marked and non-watermarked texts. Higher the
+score, stronger the evidence of watermarked text.
+We explain how to derive the p-values from their
+detection scores.
+P-value of token probability watermark (Ptp).
+We use the number of detected green-listed to-
+kens of the T token sequence as the score, i.e.,
+ϕtp = PT
+t=1 1 [xt ∈Gt], where Gt is generated
+from RNG (hash (x<t) , κ), which based on the
+watermark key and preceding tokens. To assert its
+significance, we apply a Z-test on ztp =
+ϕtp−γT
+√
+Tγ(1−γ)
+and then compute the corresponding p-value, as
+Ptp = 1 −Φ(ztp), where Φ is the cumulative dis-
+tribution function of normal distribution.
+P-value of contrastive search watermark (Pcs).
+As the score distribution in non-watermarked text
+is unknown, our proposed score for the contrastive
+search watermark is based on self-similarity dif-
+ference between the contrastive set, C and non-
+contrastive set C, split by using the key κ. Intu-
+itively, the score is higher when the correct key,
+κcs, is used to split the set, compared to using ar-
+bitrary keys. To assert the statistical significance
+in the score difference, we propose to compare the
+scores between using the known private key κcs
+and other M randomly chosen keys, κ1≤m≤M.
+We first formally define these two sets as, C and
+C. Following that we define the score of contrastive
+search watermark using any key κ as
+ϕ(κ)
+cs = −
+P
+t∈C sL(xt)
+|C|
+−
+P
+t∈C sL(xt)
+T −|C|
+
+.
+(3)
+We then compute the score for the key, κcs and
+κm, and count the number of times that the score
+of using κm is higher than κcs, Finally, we approx-
+imate the p-value of contrastive search as,
+Pcs =
+1
+M + 1
+ 
+1 +
+M
+X
+m=1
+1
+
+ϕ(κtp)
+cs
+≥ϕ(κcs)
+cs
+
+!
+.
+3.4
+Theoretical Analysis
+The following theorem shows that two watermarks
+do not influence each other.
+Theorem 3.1 (Green List Tokens using topk).
+Given X = {x1, . . . , xT } from an LLM with green
+list fraction γ, and token n’s adjusted probability
+at t follows Eq. 1. Define V (k)
+t
+as the set of top-
+k tokens by ˆpn
+t ,with xt ∼Uniform(V (k)
+t
+). Given
+E|V k
+t |G ≥ν, then the expectation and variance of
+the count of green list tokens |x|G in X are bounded
+as follows:
+E|x|G ≥ν
+kT, Var |x|G ≤T · ν (k −ν) k−2.
+In our theorem, we describe a bound that elu-
+cidates the interdependency between two water-
+marks. We model the contrastive search as akin to
+uniformly sampling from the top-k candidates. By
+
+influencing the selection among the top-k tokens
+based on historical similarity, with a large vocabu-
+lary size |V| and a small k, the process effectively
+approximates random selection. The theorem sets
+bounds on the expectation and variance of "green
+list" tokens, based on the limit of mean green to-
+ken selection within the top-k candidates. This
+effectively outlines the interdependency between
+the two watermarks in our Duwak.
+4
+Evaluation
+In this section, we first detail the evaluation setup
+on the LLM prompts and evaluation tasks. The
+evaluation metrics are the quality of watermarked
+text and the token count needed to achieve certain
+detection p values under normal conditions and
+various post-editing attacks. We compare Duwak
+against existing single watermark techniques and
+combinations thereof.
+4.1
+Evaluation setup
+Prompt.
+For evaluation, we use open-ended
+generation (Su and Collier, 2023) and MarkMy-
+Words’ (Piet et al., 2023) structured tasks. The
+detailed settings can be found in Appendix C.1.
+Models. In our experiments, we utilize two pri-
+mary models: Llama2-7b (Touvron et al., 2023b)
+and Vicuna-7b-v1.5 (Zheng et al., 2024).
+Evaluation metrics. To evaluate watermark
+methods, we use the following metrics: Diversity,
+MAUVE, Rating, and Detection efficiency. De-
+tails on these metrics and their configurations are
+provided in Appendix C.2.
+Baseline. A summarized baseline overview is
+given in Tab. 1 (i) the Kirchenbauer-Geiping-Wen
+(KGW) algorithm (Kirchenbauer et al., 2023a), Ex-
+ponential (EXP) (Aaronson, 2022), Binary (Christ
+et al., 2023) (BINARY), Inverse Transform Sam-
+pling (Kuditipudi et al., 2023) (ITS) and Con-
+trastive Search (CS) (ours) are the single water-
+marking algorithm, and (ii) KGW-EXP, CS-EXP,
+and Duwak (ours) are the dual watermark algo-
+rithms. We highlight where the watermark signals
+are inserted in the token probability or sampling.
+For dual watermarking schemes, we conduct the χ2
+test on the p-value of each watermark as Duwak.
+Hyper-parameter setting. For a fair compari-
+son across algorithms, we limit the hashing input
+to the first preceding token to generate watermark
+seeds for all watermarking algorithms. As for the
+fraction of green tokens, γ|V| under KGW proba-
+bility modification, we use a fixed γ = 0.5. The
+detection window of Duwak is set as L = 50 to-
+ken, and the probability of contrastive search is
+η = 0.5.
+KGW
+EXP
+ITS
+BINARY
+KGW-EXP
+EXP-CS
+Duwak
+∆P (xt|x<t)
+KGW
+-
+-
+-
+KGW
+-
+KGW
+Sampler
+Multi
+Exp
+Inverse
+Binary
+Exp
+CS
+CS
+Comp.
+Alg.
+Table 1: Watermarking algorithms: token probability
+modification, and sampling scheme. ‘-’ denotes no to-
+ken probability distribution modification.
+0
+100
+200
+300
+400
+500
+600
+inf
+Detection eﬃciency (p-value=0.02) (↓)
+0.65
+0.70
+0.75
+0.80
+0.85
+Rating (↑)
+BINARY
+CS+EXP
+Duwak
+EXP
+ITS
+KGW
+KGW+EXP
+(a) p = 0.02
+0
+100
+200
+300
+400
+inf
+Detection Eﬃciency (p-value=0.05) (↓)
+0.65
+0.70
+0.75
+0.80
+0.85
+Rating (↑)
+BINARY
+CS+EXP
+Duwak
+EXP
+ITS
+KGW
+KGW+EXP
+(b) p = 0.05
+Figure 2: Rating v.s. token efficiency under different
+watermarking methods and hyper-parameter settings for
+different detection p-values.
+4.2
+Results
+Quality v.s. detection efficiency. We summarize
+the overall results in Tab. 2 and Tab. 3, highlighting
+the difference among human, unaltered LLM, and
+watermarked LLM text from all the watermarking
+methods. First of all, human-written text shows the
+highest diversity and MAUVE scores. Regarding
+the quality of the watermarked text, Duwak ranks
+as the first or the second-best method in terms of
+diversity, MAUVE, and rating, achieving similar
+results as the unaltered LLM text. CS achieves the
+highest diversity and MAUVE as expected among
+the single watermarks. Among dual watermarks,
+the direct combination of the common probability
+modification (KGW) and token sampling (EXP)
+deteriorates text quality due to the EXP sampling
+method, which heavily biases the modified token
+probability. Overall, including contrastive search
+improves the text quality to its CS-less counterpart.
+The efficiency of detection of watermarks mea-
+sures the number of tokens needed to detect wa-
+termarks with p-values of 0.02. EXP-CS is the
+only exception because both watermarks are em-
+bedded in the sampling process and interfere with
+each other, arguing the risk of blending multiple
+watermarks. On the other hand, a single watermark
+
+Watermark
+Human
+No Watermark
+KGW
+EXP
+BINARY
+ITS
+CS
+KGW-EXP
+EXP-CS
+Duwak
+Diversity (%) (↑)
+93.62
+86.66
+81.41
+39.58
+44.56
+78.72
+86.53
+17.90
+83.83
+83.98
+MAUVE (%) (↑)
+100.0
+82.36
+75.5
+55.87
+55.57
+79.02
+80.71
+27.03
+77.58
+82.18
+Rating (%) (↑)
+-
+87.28
+86.15
+82.56
+87.10
+86.25
+83.74
+77.14
+83.91
+86.51
+Dection efficiency (↓)
+-
+-
+113
+89.5
+847
+>1024
+>1024
+79.5
+572
+94.5
+Table 2: Comparison of watermarking methods on different metrics on Llama2-7b. Arrows point to the direction of
+better performance: a downward arrow (↓) means lower is better, and an upward arrow (↑) means higher is better.
+Bold/underlined text means the best/second-best score.
+Watermark
+No Watermark
+KGW
+EXP
+BINARY
+ITS
+Duwak
+Rating (%) (↑)
+84.1
+82.1
+82.0
+82.2
+83.4
+83.1
+Detection efficiency (↓)
+-
+101.5
+71
+252
+>1024
+82.5
+Table 3: Comparison of watermarking methods on dif-
+ferent metrics on Vicuna-7b-v1.5.
+requires a significantly higher number of tokens,
+especially for BINARY, ITS, and CS, strengthen
+the watermarked text’s robustness and quality.
+Fig. 2 provides a sensitivity perspective of wa-
+termark methods under different hyper-parameter
+settings and p-values, 0.02 and 0.05. Specifically,
+different δ values are used in KGW probability
+modification. Duwak shows more consistent per-
+formance across all δ’s compared to KGW, i.e.,
+slightly higher rating and lower tokens with a lower
+variance. This trend continues for a p-value of
+0.05, with a more pronounced difference in their re-
+quired token counts. Specifically, when compared
+to the best KGW watermark, our algorithm requires
+∼40 fewer tokens. When p-values are smaller, the
+number of tokens needed for detection increases
+considerably.
+Duwak achieves the best quality efficiency ratio,
+high diversity, MAUVE, and rating, using fewer
+tokens to detect watermarks accurately compared
+to other watermarking methods.
+Post-editing attack robustness. Here, we eval-
+uate the robustness of Duwak under different post-
+editing attacks, i.e., attacks that alter the tokeniza-
+tion. Specifically, we consider contraction, lower-
+case, misspelling, repetition, swap, synonym, trans-
+lation, typo, and paraphrase attacks from MarkMy-
+Words (Piet et al., 2023). Tab. 4 and Tab. 5 present
+the efficiency of reaching a p-value of 0.02 under
+KGW, EXP, and Duwak. Such a selection is based
+on the observation in Tab. 2 that only these three
+methods achieve reasonable text quality while in-
+specting roughly 100 tokens.
+In Tab. 4, while EXP shows the best efficiency
+in the no-attack scenario (through significant infer-
+ence quality), Duwak requires significantly lower
+Attack
+Conf.
+EXP
+KGW
+Duwak
+None
+89.5
+113
+94.5
+Contraction
+88.5
+114
+87.5
+Lowercase
+106
+146
+113
+Repetition&deletion
+83.5
+108
+87.0
+Paraphrase
+GPT3.5
+238
+322
+193
+Misspelling
+25%
+93.5
+119
+82.5
+50%
+148
+147
+114
+Swap
+5%
+83.0
+113
+77.5
+10%
+83.0
+113
+82.0
+Synonym
+25%
+90.5
+118
+81.0
+50%
+100
+134
+100
+75%
+126
+169
+112
+100%
+170
+213
+125
+Translation
+FR
+118
+147
+114
+RU
+156
+195
+148
+TypoAttack
+5%
+221
+221
+177
+10%
+389
+337
+301
+Table 4: Attacked detection efficiency on Llama2-7b,
+lower is better.
+Attack
+Conf.
+EXP
+KGW
+Duwak
+None
+71
+101.5
+82.5
+Contraction
+72.5
+99
+87.5
+Lowercase
+108
+130
+113.5
+Repetition&deletion
+72.5
+114
+89
+Paraphrase
+GPT3.5
+1024
+582
+328
+Misspelling
+25%
+124
+128.5
+116.5
+50%
+82
+96
+86
+Swap
+5%
+84.5
+96
+84
+10%
+84
+100.5
+101.5
+Synonym
+25%
+80.5
+118
+91
+50%
+97
+131
+116
+75%
+142.5
+139.5
+126
+100%
+206.5
+156
+126.5
+Translation
+FR
+102
+155
+106.5
+RU
+137.5
+168
+148
+TypoAttack
+5%
+212
+209.5
+185
+10%
+1024
+1024
+316
+Table 5: Attacked detection efficiency on Vicuna-7b-
+v1.5, lower is better.
+
+tokens for inspection in the presence of attacks,
+i.e., ranging between 6 to 70%. The presence of
+attacks clearly increases the need to consider more
+tokens for all watermark methods. Let’s zoom into
+the performance of Duwak against each of those
+attacks, in contrast to the cast of no attack. TypoAt-
+tack significantly increases the detection difficulty
+and results in a more than 3× increase in the num-
+ber of tokens. Misspelling and repetition&deletion,
+swap, and synonym (25%) are simple attacks, even
+reducing the number of inspection tokens. Para-
+graphs and TypoAttack are where Duwak has the
+best performance, compared to EXP, the second-
+best policy. We attribute this difference to the two
+watermarks and no interference among them. Ad-
+ditionally, Duwak benefits from incorporating two
+distinct watermarks that operate without mutual in-
+terference, thereby enhancing its robustness. In re-
+sults from Vicuna-7b-v1.5, as shown in Tab. 5, we
+observe similar trends in performance. However,
+under some attacks, particularly simpler ones, EXP
+achieves better efficiency. Nevertheless, in more
+severe scenarios, especially with strong attacks like
+the paraphrase attack, Duwak significantly outper-
+forms EXP, demonstrating its robustness in han-
+dling more complex attacks.
+2.5
+3.0
+3.5
+δ
+0
+25
+50
+75
+100
+125
+150
+175
+200
+Detection Eﬃciency (p-value=0.02) (↓)
+Duwak
+KGW
+(a) No attack.
+2.5
+3.0
+3.5
+δ
+0
+200
+400
+600
+800
+inf
+Detection eﬃciency (p-value=0.02) (↓)
+(b) Paraphrase attack.
+Figure 3: Detection efficiency (↓) of Duwak and KGW
+with equal hyper-config under varying δ.
+Impact of contrastive search sampling. Here,
+we highlight the impact of contrastive search com-
+pared to the single KGW watermark. In Fig. 3, we
+show the rating and the number of inspected tokens
+to achieve a p-value of 0.02 under the different
+distribution shifting(δ ∈{2.5, 3, 3.5}) with clean
+and paraphrase attack versions. Unsurprisingly,
+Duwak outperforms KGW due to the addition of
+contrastive search, such the advantage diminishes
+with increasing δ. When δ is large, e.g., 3.5, it
+introduces a large distortion in the generation prob-
+ability, leaving little room for Duwak to further
+improve the quality. In the case of the challenging
+paraphrasing post-attacks, shown in Fig. 4b, one
+can observe the clear advantage of using contrastive
+search. This observation again verifies our design
+of dual watermark, which is inherently more robust
+to the post-editing when compared to the token-
+level approaches of prior art.
+5
+Related Studies
+Prior single watermark solutions embed the water-
+mark signal at the token level with a modification
+of the generation process by modifying either the
+token probability distribution (Lee et al., 2023b;
+Wu et al., 2023; Takezawa et al., 2023) or sam-
+pling scheme (Aaronson, 2022; Christ et al., 2023;
+Kuditipudi et al., 2023).
+Watermark in token probability distribution.
+Kirchenbauer et al. (2023a) design the very first
+single-bit watermark method for LLM text genera-
+tion, splitting tokens into a green and red list using
+a cryptographic key.
+To further improve the text quality and robust-
+ness, subsequent studies modify the criteria of
+green-red splits.
+Zhao et al. (2023) prove that
+global red-green splits improve robustness against
+post-editing attacks, whereas Kirchenbauer et al.
+(2023b) propose to use the minimum hashed token
+to determine the red-green list.
+Furthermore, to improve the governance of wa-
+termarks and provide additional information, e.g.,
+copyright and timestamp, multi-bit watermarks
+(Wang et al., 2023b; Yoo et al., 2023; Fernandez
+et al., 2023) are proposed, introducing message-
+specific red-green lists. We note that such water-
+marks split the text into multiple sections, each of
+which has only a single watermark in their token
+probability, whereas our solution embeds up to two
+watermarks into a single token.
+Watermark
+in
+Sampling
+Binary
+water-
+mark (Christ et al., 2023) samples the token based
+on the comparison of the predicted probability
+and the pseudo-random presentation.
+Because
+of the fixed length of pseudo-random numbers,
+the LLM can end up generating the same text
+for the same prompt.
+Kuditipudi et al. (2023)
+propose the usage of longer pseudo-random
+number sequences than the generated text itself
+and randomly choose the insertion location in the
+text to add the watermark. Hou et al. (2023) resort
+to watermarking via sentence-level sampling,
+which iteratively performs sentence-level rejection
+sampling until the sampled sentence falls within
+
+the watermarked region.
+We note that orthogonal to watermark detection
+is more general detection of whether text is synthe-
+sized by LLMs (Solaiman et al., 2019; Gehrmann
+et al., 2019; Mireshghallah et al., 2023; Mitchell
+et al., 2023; Hu et al., 2023). However, as trace-
+ability to specific models cannot be provided, these
+detection works are limited in their application for
+the governance of synthesized text.
+6
+Conclusion
+In this paper, we propose a dual watermark scheme
+for LLM, Duwak, which embeds human imper-
+ceptible and machine detectable watermarks in to-
+ken probability distribution and sampling schemes.
+Combining two watermarks significantly decreases
+the minimum number of tokens for detecting water-
+marks with a desirable false positive rate, especially
+when encountering post-editing attacks. To avoid
+text quality degradation due to watermarking token
+probabilities, we design a contrastive search sam-
+pling scheme that samples tokens with the lowest
+similarity. We show the effectiveness of Duwak by
+providing a theoretical lower bound on the water-
+marked tokens and extensive empirical evaluation.
+Compared against existing single watermark solu-
+tions and combinations thereof, Duwak provides a
+better watermarked text quality. This is especially
+highlighted in terms of diversity, and robustness
+against nine post-editing attacks, using up to 70%
+less tokens for detection.
+7
+Limitation
+This study introduces advancements in watermark-
+ing techniques for Large Language Models (LLMs)
+through Duwak, while also recognizing certain lim-
+itations that warrant future investigation. Firstly,
+our approach’s effectiveness is contingent on the
+specific characteristics of the LLMs evaluated, pri-
+marily Llama2. Consequently, the applicability
+of Duwak to different models and subsequent ver-
+sions of LLMs is a subject that merits further explo-
+ration. Moreover, our evaluation was restricted to
+text-generation tasks. The extension of our method-
+ology to encompass additional tasks, such as the
+generation of mathematical proofs or code, remains
+an area requiring in-depth study.
+Additionally,
+Duwak necessitates conducting two separate detec-
+tion processes for each watermark, which results
+in a decrease in detection time efficiency compared
+to single watermark methods.
+Impact Statements
+With the popularity of large language models and
+their applications, embedding watermarks into their
+generated content is an essential step toward trust-
+worthy and responsible AI technology development
+and deployment. Our findings of improved wa-
+termark detection performance and utility provide
+novel insights into the research and practice of wa-
+termarking for large language models.
+Acknowledgment
+This work has been partly funded by the Dutch
+National Science Foundation Perspectief Project,
+DEPMAT.
+References
+Scott Aaronson. 2022. My ai safety lecture for ut effec-
+tive altruism.
+Miranda Christ, Sam Gunn, and Or Zamir. 2023. Un-
+detectable watermarks for language models. arXiv
+preprint arXiv:2306.09194.
+Kawin Ethayarajh. 2019. How contextual are contextu-
+alized word representations? comparing the geome-
+try of bert, elmo, and GPT-2 embeddings. In Proceed-
+ings of the 2019 Conference on Empirical Methods
+in Natural Language Processing and the 9th Inter-
+national Joint Conference on Natural Language Pro-
+cessing, EMNLP-IJCNLP 2019, Hong Kong, China,
+November 3-7, 2019, pages 55–65. Association for
+Computational Linguistics.
+Angela Fan, Mike Lewis, and Yann N. Dauphin. 2018a.
+Hierarchical neural story generation. In Proceedings
+of the 56th Annual Meeting of the Association for
+Computational Linguistics, ACL 2018, Melbourne,
+Australia, July 15-20, 2018, Volume 1: Long Papers,
+pages 889–898.
+Angela Fan, Mike Lewis, and Yann N. Dauphin. 2018b.
+Hierarchical neural story generation. In Proceedings
+of the 56th Annual Meeting of the Association for
+Computational Linguistics, ACL 2018, Melbourne,
+Australia, July 15-20, 2018, Volume 1: Long Papers,
+pages 889–898. Association for Computational Lin-
+guistics.
+Pierre Fernandez, Antoine Chaffin, Karim Tit, Vivien
+Chappelier, and Teddy Furon. 2023. Three bricks to
+consolidate watermarks for large language models.
+Ronald A Fisher. 1922. On the interpretation of χ 2
+from contingency tables, and the calculation of p.
+Journal of the royal statistical society, 85(1):87–94.
+Sebastian Gehrmann, Hendrik Strobelt, and Alexan-
+der M. Rush. 2019. GLTR: statistical detection and
+visualization of generated text. In Proceedings of
+
+the 57th Conference of the Association for Compu-
+tational Linguistics, ACL 2019, Florence, Italy, July
+28 - August 2, 2019, Volume 3: System Demonstra-
+tions, pages 111–116. Association for Computational
+Linguistics.
+Ari Holtzman, Jan Buys, Li Du, Maxwell Forbes, and
+Yejin Choi. 2020. The curious case of neural text
+degeneration. In 8th International Conference on
+Learning Representations, ICLR 2020, Addis Ababa,
+Ethiopia, April 26-30, 2020.
+Abe Bohan Hou,
+Jingyu Zhang,
+Tianxing He,
+Yichen Wang, Yung-Sung Chuang, Hongwei Wang,
+Lingfeng Shen, Benjamin Van Durme, Daniel
+Khashabi, and Yulia Tsvetkov. 2023. Semstamp: A
+semantic watermark with paraphrastic robustness for
+text generation.
+Xiaomeng Hu, Pin-Yu Chen, and Tsung-Yi Ho. 2023.
+Radar: Robust ai-text detection via adversarial learn-
+ing.
+Advances in Neural Information Processing
+Systems, 36:15077–15095.
+John Kirchenbauer,
+Jonas Geiping,
+Yuxin Wen,
+Jonathan Katz, Ian Miers, and Tom Goldstein. 2023a.
+A watermark for large language models.
+arXiv
+preprint arXiv:2301.10226.
+John Kirchenbauer, Jonas Geiping, Yuxin Wen, Manli
+Shu, Khalid Saifullah, Kezhi Kong, Kasun Fernando,
+Aniruddha Saha, Micah Goldblum, and Tom Gold-
+stein. 2023b. On the reliability of watermarks for
+large language models.
+Tom Kocmi and Christian Federmann. 2023. Large lan-
+guage models are state-of-the-art evaluators of trans-
+lation quality. In Proceedings of the 24th Annual
+Conference of the European Association for Machine
+Translation, EAMT 2023, Tampere, Finland, 12-15
+June 2023, pages 193–203. European Association for
+Machine Translation.
+Rohith
+Kuditipudi,
+John
+Thickstun,
+Tatsunori
+Hashimoto, and Percy Liang. 2023.
+Robust
+distortion-free watermarks for language models.
+arXiv preprint arXiv:2307.15593.
+Taehyun Lee, Seokhee Hong, Jaewoo Ahn, Ilgee Hong,
+Hwaran Lee, Sangdoo Yun, Jamin Shin, and Gunhee
+Kim. 2023a. Who wrote this code? watermarking
+for code generation. CoRR, abs/2305.15060.
+Taehyun Lee, Seokhee Hong, Jaewoo Ahn, Ilgee Hong,
+Hwaran Lee, Sangdoo Yun, Jamin Shin, and Gunhee
+Kim. 2023b. Who wrote this code? watermarking
+for code generation.
+Aiwei Liu, Leyi Pan, Xuming Hu, Shiao Meng,
+and Lijie Wen. 2023.
+A semantic invariant ro-
+bust watermark for large language models. CoRR,
+abs/2310.06356.
+Fatemehsadat Mireshghallah, Justus Mattern, Sicun
+Gao, Reza Shokri, and Taylor Berg-Kirkpatrick.
+2023.
+Smaller language models are better black-
+box machine-generated text detectors.
+CoRR,
+abs/2305.09859.
+Eric Mitchell, Yoonho Lee, Alexander Khazatsky,
+Christopher D. Manning, and Chelsea Finn. 2023.
+Detectgpt: Zero-shot machine-generated text detec-
+tion using probability curvature. In International
+Conference on Machine Learning, ICML 2023, 23-
+29 July 2023, Honolulu, Hawaii, USA, volume 202
+of Proceedings of Machine Learning Research, pages
+24950–24962. PMLR.
+OpenAI. 2022. Chatgpt: Optimizing language models
+for dialogue.
+Julien Piet, Chawin Sitawarin, Vivian Fang, Norman
+Mu, and David Wagner. 2023. Mark my words: An-
+alyzing and evaluating language model watermarks.
+arXiv preprint arXiv:2312.00273.
+Krishna Pillutla, Swabha Swayamdipta, Rowan Zellers,
+John Thickstun, Sean Welleck, Yejin Choi, and Zaid
+Harchaoui. 2021. Mauve: Measuring the gap be-
+tween neural text and human text using divergence
+frontiers. In Advances in Neural Information Pro-
+cessing Systems, volume 34, pages 4816–4828. Cur-
+ran Associates, Inc.
+Jie Ren, Han Xu, Yiding Liu, Yingqian Cui, Shuaiqiang
+Wang, Dawei Yin, and Jiliang Tang. 2023. A robust
+semantics-based watermark for large language model
+against paraphrasing. CoRR, abs/2311.08721.
+Baptiste Rozière, Jonas Gehring, Fabian Gloeckle, Sten
+Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,
+Jingyu Liu, Tal Remez, Jérémy Rapin, Artyom
+Kozhevnikov, Ivan Evtimov, Joanna Bitton, Man-
+ish Bhatt, Cristian Canton-Ferrer, Aaron Grattafiori,
+Wenhan Xiong, Alexandre Défossez, Jade Copet,
+Faisal Azhar, Hugo Touvron, Louis Martin, Nico-
+las Usunier, Thomas Scialom, and Gabriel Synnaeve.
+2023. Code llama: Open foundation models for code.
+CoRR, abs/2308.12950.
+Irene Solaiman, Miles Brundage, Jack Clark, Amanda
+Askell, Ariel Herbert-Voss, Jeff Wu, Alec Radford,
+and Jasmine Wang. 2019. Release strategies and
+the social impacts of language models.
+CoRR,
+abs/1908.09203.
+Yixuan Su and Nigel Collier. 2023. Contrastive search
+is what you need for neural text generation. Trans.
+Mach. Learn. Res., 2023.
+Yixuan Su, Tian Lan, Yan Wang, Dani Yogatama, Ling-
+peng Kong, and Nigel Collier. 2022. A contrastive
+framework for neural text generation. In NeurIPS.
+Yuki Takezawa, Ryoma Sato, Han Bao, Kenta Niwa,
+and Makoto Yamada. 2023. Necessary and sufficient
+watermark for large language models.
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+
+Bhosale, Dan Bikel, Lukas Blecher, Cristian Canton-
+Ferrer, Moya Chen, Guillem Cucurull, David Esiobu,
+Jude Fernandes, Jeremy Fu, Wenyin Fu, Brian Fuller,
+Cynthia Gao, Vedanuj Goswami, Naman Goyal, An-
+thony Hartshorn, Saghar Hosseini, Rui Hou, Hakan
+Inan, Marcin Kardas, Viktor Kerkez, Madian Khabsa,
+Isabel Kloumann, Artem Korenev, Punit Singh Koura,
+Marie-Anne Lachaux, Thibaut Lavril, Jenya Lee, Di-
+ana Liskovich, Yinghai Lu, Yuning Mao, Xavier Mar-
+tinet, Todor Mihaylov, Pushkar Mishra, Igor Moly-
+bog, Yixin Nie, Andrew Poulton, Jeremy Reizen-
+stein, Rashi Rungta, Kalyan Saladi, Alan Schelten,
+Ruan Silva, Eric Michael Smith, Ranjan Subrama-
+nian, Xiaoqing Ellen Tan, Binh Tang, Ross Tay-
+lor, Adina Williams, Jian Xiang Kuan, Puxin Xu,
+Zheng Yan, Iliyan Zarov, Yuchen Zhang, Angela Fan,
+Melanie Kambadur, Sharan Narang, Aurélien Ro-
+driguez, Robert Stojnic, Sergey Edunov, and Thomas
+Scialom. 2023a. Llama 2: Open foundation and fine-
+tuned chat models. CoRR, abs/2307.09288.
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+Bhosale, et al. 2023b.
+Llama 2: Open founda-
+tion and fine-tuned chat models.
+arXiv preprint
+arXiv:2307.09288.
+Michael Veale and Frederik Zuiderveen Borgesius.
+2021. Demystifying the draft eu artificial intelligence
+act—analysing the good, the bad, and the unclear el-
+ements of the proposed approach. Computer Law
+Review International, 22(4):97–112.
+Lean Wang, Wenkai Yang, Deli Chen, Hao Zhou,
+Yankai Lin, Fandong Meng, Jie Zhou, and Xu Sun.
+2023a. Towards codable text watermarking for large
+language models. CoRR, abs/2307.15992.
+Lean Wang, Wenkai Yang, Deli Chen, Hao Zhou,
+Yankai Lin, Fandong Meng, Jie Zhou, and Xu Sun.
+2023b. Towards codable watermarking for injecting
+multi-bit information to llm.
+Sean Welleck, Ilia Kulikov, Stephen Roller, Emily Di-
+nan, Kyunghyun Cho, and Jason Weston. 2020. Neu-
+ral text generation with unlikelihood training. In
+8th International Conference on Learning Represen-
+tations, ICLR 2020, Addis Ababa, Ethiopia, April
+26-30, 2020.
+Yihan Wu, Zhengmian Hu, Hongyang Zhang, and Heng
+Huang. 2023. Dipmark: A stealthy, efficient and
+resilient watermark for large language models.
+KiYoon Yoo, Wonhyuk Ahn, and Nojun Kwak. 2023.
+Advancing beyond identification: Multi-bit water-
+mark for large language models.
+Biao Zhang, Barry Haddow, and Alexandra Birch. 2023.
+Prompting large language model for machine trans-
+lation: A case study. In International Conference
+on Machine Learning, ICML 2023, 23-29 July 2023,
+Honolulu, Hawaii, USA, volume 202 of Proceedings
+of Machine Learning Research, pages 41092–41110.
+PMLR.
+Xuandong Zhao, Prabhanjan Ananth, Lei Li, and Yu-
+Xiang Wang. 2023. Provable robust watermarking
+for ai-generated text. CoRR, abs/2306.17439.
+Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan
+Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin,
+Zhuohan Li, Dacheng Li, Eric Xing, et al. 2024.
+Judging llm-as-a-judge with mt-bench and chatbot
+arena. Advances in Neural Information Processing
+Systems, 36.
+
+A
+Nomenclature
+α
+Parameter balancing the importance of token probability and self-similarity in contrastive search.
+θ
+Large language model parameters used for text generation.
+δ
+Bias term added to the logits of tokens on the green list to alter their probabilities.
+η
+Probability determining whether contrastive search or multinomial sampling is used for token
+generation.
+γ
+Portion of the vocabulary designated as the green list in the token probability modification process.
+ˆpn
+t
+The probability distribution over tokens after applying watermark modifications.
+κcs, κtp Secret keys used for embedding watermarks in the text.
+G
+A subset of tokens selected for next word generation, influenced by a watermark key.
+V
+The set of all possible tokens the LLM model can generate.
+Φ, Fχ2 Cumulative distribution functions used to calculate p-values in hypothesis testing for watermark
+detection.
+ϕcs
+A score for Contrastive Search watermark.
+ϕtp
+A score computed for token token probability watermark
+HV
+The representation of tokens in the model’s hidden layer.
+k
+Top-k parameter defining the number of top predictions considered in the generation process.
+L
+Sliding window length used in contrastive search to compute token similarity.
+lt
+The raw outputs of the LLM model for the next token, before applying the softmax function.
+P, Pcs, Ptp P-values indicating the likelihood of observing the test results under the null hypothesis.
+sL(xt) A measure of a token’s similarity to its preceding tokens within a sliding window of length L.
+Hash A function used to generate a hash value based on the current context.
+RNG
+A function generating pseudo-random numbers based on a seed and possibly a key.
+
+B
+Additional Results
+B.1
+Rating and perplexity comparison between Duwak and KGW
+2.5
+3.0
+3.5
+δ
+0.80
+0.81
+0.82
+0.83
+0.84
+0.85
+0.86
+0.87
+0.88
+Rating (↑)
+Duwak
+KGW
+(a) No attack.
+2.5
+3.0
+3.5
+δ
+0.00
+0.25
+0.50
+0.75
+1.00
+1.25
+1.50
+1.75
+2.00
+Perplexity (↓)
+Duwak
+KGW
+(b) Paraphrase attack.
+Figure 4: Comparative analysis of Duwak and KGW with identical hyper-parameters under varying δ, detection
+efficiency (↓).
+B.2
+Empirical false positive rates
+To assess the theoretical false positive rate (p-value) through empirical means, we utilize a the following
+methodology to identify unwatermarked text within the Wikitext dataset. For each watermark, we examine
+10,000 samples, each with an average length of 260 tokens. The empirical false positive rate is determined
+by the proportion of texts erroneously identified as watermarked at the p-value threshold.
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Theoretical False Positive Rate
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Empirical False Positive Rate
+Duwak
+KGW
+EXP
+CS
+(a) Complete comparison.
+0.00
+0.02
+0.04
+0.06
+0.08
+0.10
+Theoretical False Positive Rate
+0.00
+0.02
+0.04
+0.06
+0.08
+0.10
+Empirical False Positive Rate
+Duwak
+KGW
+EXP
+CS
+(b) Zoomed-in version of Fig. 5a from 0 to 0.1.
+Figure 5: Comparison of empirical false positive rate and theoretical false positive rate for different watermarks
+We observe that our algorithm does not result in an empirical false positive rate (FPR) higher than the
+theoretical FPR. Moreover, all methods tend to overestimate the false positive rate when the p-value is
+lower than 0.1, particularly in the case of KGW.
+
+B.3
+Detection Efficiency Under Different p-value Thresholds
+101
+102
+103
+0.65
+0.70
+0.75
+0.80
+0.85
+p-value
+0.01
+0.1
+∞
+Algorithm
+BINARY
+CS+EXP
+Duwak
+EXP
+ITS
+KGW
+KGW+EXP
+Detection Eﬃciency vs. Rating for Diﬀerent Watermarking Methods
+Detection Eﬃciency (↓)
+Rating (↑)
+Figure 6: Detection efficiency vs. rating under different watermarking methods and hyper-parameter settings with
+p-value 0.01 and 0.01. Arrows are drawn between the corresponding configurations with different p-values to
+indicate the reduction of detection tokens required for a more lenient p-value.
+B.4
+Ablation Study
+We conducted additional experiments on the Llama2-7b model, as shown in Table 6, to assess the
+effectiveness of our Duwak when both components are active as well as to assess the effectiveness of each
+individual component (KGW and CS) on the process. Table 6 summarizes the detection efficiency results,
+defined as the median number of minimal tokens needed for detection when the p-value reaches 0.02.
+These findings clearly demonstrate that the combined use of both the KGW watermark and the contrastive
+search watermark within our Duwak results in superior detection efficiency compared to the performance
+the individual components.
+C
+Evaluation Setup
+C.1
+Prompt
+For evaluation, we use open-ended generation and MarkMyWords’ (Piet et al., 2023) structured tasks.
+Open-ended text generation: Following Su and Collier (2023), 40 WebText corpus token prompts are
+used to generate completions of up to 200 tokens. Comparing the quality of watermarked generations to
+the datasets’ human-completions indicates the watermarkings’ relative effectiveness.
+MarkMyWords generation tasks: Additionally, we include three tasks from the MarkMyWords dataset—
+book reports, story generation, and fake news generation—to mirror realistic scenarios where watermark-
+ing allows for harm mitigation and accountability.
+
+C.2
+Evaluation metrics
+We use the following metrics to assess the performance and effectiveness of watermark methods.
+Diversity: Accounts variance in generated content using repetition under varying n-grams (n ∈
+{2, 3, 4}).
+MAUVE: (Pillutla et al., 2021) Measures the similarity between generated and human-written text token
+distributions. Higher MAUVE shows better resemblance to human text.
+Rating: Automated evaluation with the GPT-3.5 Turbo API, rating the relevance and fluency of
+watermarked texts on a 100-point scale based on zero-shot prompting.
+Detection efficiency: The minimum token count required for watermark detection for a type-I error rate
+(p-value). Thus ensuring a precise balance between text length and the efficacy of watermark detection,
+highlighting our watermarking technique’s efficiency.
+C.3
+Assessment Guidelines for Rating Responses
+To systematically evaluate the text quality, each text will be graded out of a total of 100 points by GPT-3.5.
+The grading criteria are divided into four key categories, with points allocated as follows:
+Accuracy (20 points): This measures the correctness and relevance of the response in relation to the
+provided prompt. Points are awarded based on how well the response adheres to factual accuracy and
+pertinence to the initial query or statement.
+Detail (20 points): This assesses the comprehensiveness and depth of the response. A higher score
+is given for responses that cover the topic thoroughly, providing a nuanced understanding of the subject
+matter.
+Grammar and Typing (30 points): This category evaluates the grammatical and typographical
+precision of the response. A flawless submission, free from spelling errors, punctuation mistakes, and
+grammatical inaccuracies, will receive full points.
+Vocabulary (30 points): This criterion looks at the appropriateness and richness of the language used.
+Responses that utilize a diverse vocabulary appropriately and effectively to convey ideas will score higher
+in this category.
+Points should be deducted for any deficiencies observed within each category. The total score, calculated
+out of 100, should be presented at the beginning of the evaluative feedback.
+Prompt Template:
+[INST] <<SYS>> You are given a prompt and a response,
+and you need to grade the response out of 100 based on:
+Accuracy (20 points) - correctness and relevance to the prompt;
+Attack
+Conf.
+Duwak
+KGW in Duwak
+CS in Duwak
+None
+83
+89
+269
+Contraction
+81
+87
+241
+Lowercase
+97
+114
+233
+Repetition&deletion
+76
+82
+300
+Misspelling
+25%
+84
+91
+543
+50%
+88
+99
+228
+Swap
+5%
+84
+96
+342
+10%
+89
+102
+206
+Synonym
+25%
+88.5
+92
+247.5
+50%
+85.5
+104
+275.5
+75%
+91
+108
+259.5
+100%
+97.5
+125
+351
+Translation
+FR
+105
+153
+675
+RU
+107
+148.5
+>1024
+TypoAttack
+5%
+85
+150
+517
+10%
+152
+225
+985
+Paraphrase
+GPT3.5
+184
+312
+1012
+Table 6: Attacked detection efficiency on Llama2-7b for Duwak and it’s components, lower is better.
+
+Detail (20 points) - comprehensiveness and depth;
+Grammar and Typing (30 points) - grammatical and typographical accuracy;
+Vocabulary (30 points) - appropriateness and richness.
+Deduct points for shortcomings in each category.
+Give a total grade at the first line of the response. <</SYS>>
+Prompt: {}
+Response: {}
+[/INST] Grade out of 100:
+This structured approach ensures a comprehensive and fair assessment of GPT-3.5’s responses, facilitat-
+ing a consistent evaluation process.
+
+D
+Generated text
+Table 7: Completions to prompt “[INST] «SYS» You are a helpful assistant. Always answer in the most accurate
+way. «/SYS» Write a story about a retired astronaut that joins a risky interstellar rescue mission.. [/INST]”, limited
+to first 3 sentences.
+response
+generator
+delta
+BINARY
+1.5
+John "Hawk" Hawkins had seen it all during his illustrious career as an astronaut.
+He had flown on dozens of missions to space, including the historic first manned
+voyage to Mars, and had even broken a record for the longest time spent in space.
+But after decades of flying through the cosmos, Hawk decided it was time to
+hang up his space suit and enjoy his well-deserved retirement.\n\nThat was
+until he received a distress call from a nearby planet that had been devastated
+by a catastrophic event
+CS
+2.5
+Title: The Call of Duty\n\nRetired astronaut John "Hawk" Hawkins had seen it
+all during his illustrious career in space exploration. From the vastness of the
+cosmos to the intricate workings of the human body, he had experienced it all.
+But at the age of 65, he thought he had left his adventurous days behind
+CS+EXP
+2.5
+Title: The Call of Duty\n\nJohn "Hawk" Hawkins, a retired astronaut in his
+early sixties, had grown accustomed to the quiet life on Earth. After decades
+of space travel, he had left the thrill of exploration behind and settled into a
+comfortable routine. However, fate had other plans.\n\nOne fateful evening,
+while watching the news, Hawk’s eyes widened as he listened to the urgent
+message from Mission Control: an interstellar rescue mission was underway,
+and they needed his expertise
+CS+KGW
+2.5
+Title: The Call of Duty\n\nRetired astronaut John "Jack" Jackson had spent
+his entire adult life working for NASA, logging over a hundred days in space
+and earning a reputation as one of the best pilots in the business. But after a
+near-fatal accident on a mission to Mars, he was forced to retire and leave his
+beloved space travel behind.\n\nYears went by, and Jack found himself growing
+restless and unfulfilled in his post-NASA life. He spent his days golfing and
+fishing, but something was missing
+EXP
+1.5
+Title: The Courageous Retiree\n\nJohn "Hawk" Hawkins, a grizzled astronaut
+in his early sixties, had long since left his spacefaring days behind. Or so he
+thought. When he received the phone call from Mission Control, his heart raced
+with a mixture of excitement and trepidation
+KGW
+2.5
+Title: The Call of Duty\n\nMission Briefing:\n\nMission Objective: Retrieve
+the last surviving member of the Icarus Expedition, stranded on a hostile
+exoplanet.\n\nMission Location: Planet Xylophia-IV, located 4.5 light years
+from Earth.\n\nMission Profile: The Icarus Expedition was sent to explore
+Xylophia-IV over 5 years ago. Upon reaching the planet’s atmosphere, their
+spacecraft encountered unexpected storms and malfunctions, causing them to
+crash-land on the hostile surface. The surviving member of the expedition,
+Captain Emma Taylor, has been stranded on the planet for over 4 years, with
+limited supplies and medical equipment
+
+Table 8: Completions to prompt “[INST] «SYS» You are a helpful assistant. Always answer in the most accurate
+way. «/SYS» Write a book report about ’A Clockwork Orange’, written by Anthony Burgess. [/INST]”, limited to
+first 3 sentences.
+response
+generator
+delta
+BINARY
+-
+Sure, I’d be happy to help you with a book report on "A Clockwork Orange" by
+Anthony Burgess!\n\nIntroduction:\n\n"A Clockwork Orange" is a dystopian
+novel written by Anthony Burgess in 1962. The novel is set in a future society
+where violence and sexuality are Conditioned into the population through a pe-
+culiar Conditioning method called the "Ludovico technique." The story follows
+the protagonist, Alex, a young man who is imprisoned for his vicious crimes
+and undergoes the Ludovico treatment to reduce his criminal urges. However,
+upon his release, Alex finds that he is unable to enjoy his favorite pastime
+– raping and Ultraviolence – due to the side effects of the treatment.\n\nPlot
+Summary:\n\nThe novel begins with Alex, a charismatic and violent young
+man, who lives in a dystopian society where Conditioning is a norm
+CS
+-
+Title:
+A Clockwork Orange\nAuthor:
+Anthony Burgess\nPublished:
+1962\nPages: 208\n\nBook Report:\n\n"A Clockwork Orange" is a dystopian
+novel written by anthony Burgees in 1962. The story takes place in a future
+society where violence and sexuality are socially accepted and encouraged. The
+protagonist, Alex DeLarge, is a charismatic and intelligent young hoodlum
+who leads a gang of teenage thugs in a world where "ultraviolence" is the
+norm.\n\nThe novel explores themes of free will, morality, and rehabilitation
+through Alex’s journey
+CS+EXP
+-
+Title:
+A Clockwork Orange\nAuthor:
+Anthony Burgess\nPublished:
+1962\nPages: 208\n\nBook Report:\n\n"A ClockWORK Orange" is a dystopian
+novel written by Anthony Burgee in 1962. The story takes place in a future
+society where violence and sexual deviance are socially accepted and encour-
+aged. The protagonist, Alex, is a charismatic and intelligent young hoodlum
+who narrates the events of the novels with a unique slang and dialect.\n\nThe
+novel begins with Alex and his droogs (friends) committing a series of violent
+crimes, including rape and murder
+CS+KGW
+2.5
+Sure, I’d be happy to help you with your book report on "A Clockwork Orange"
+by Anthony Burgess!\n\nTitle: "A Clockwork Orange"\nAuthor: Anthoyn
+Burgess\nPublication Date: 1962\nGenre: Dystopian Novel, Satire, Young
+Adult\n\nPlot Summary:\nSet in a dystopian future, "A Clockwork Orange"
+follows the story of Alex, a charismatic and violent young hoodlum, who
+is arrested and sentenced to a controversial rehabilitation program called the
+"Ludovico technique." This program is designed to condition Alex to detest
+violence and sex, and to promote a sense of empathy and compassion towards
+others. However, the program has unintended consequences, and Alex becomes
+increasingly isolated and disillusioned with society.\n\nThroughout the novel,
+Burgess explores themes of free will, morality, and the nature of evil. Burgess
+challenges the reader to question the morality of punishing individuals for
+their actions, and to consider the ethics of manipulating people’s emotions and
+behaviors through conditioning.\n\nCharacters:\n\n* Alex: The protagonist of
+the novel, Alex is a violent and charismatic young hoodlum who is the narrator
+of the story
+
+EXP
+1.5
+Title: A Clockwork Orange\nAuthor: Anthony Burgess\nPublication Date:
+1962\nGenre:
+Dystopian Novel, Horror, Science Fiction\n\nBook Re-
+port:\n\nSet in a dystopian near-future, Anthony Burgess’s "A Clockwork
+Orange" follows the story of Alex, a charismatic young hoodlum who, along
+with his gang, commits gruesome acts of violence and rape. The novel ex-
+plores themes of free will, morality, and the impact of societal conditioning
+on human behavior.\n\nTitle Analysis:\nThe title "A Clockwork Orange" is a
+clever play on words, referencing both the novel’s dystopian setting and the
+lead character’s name. The term "clockwork orange" is a contradictory phrase,
+as oranges are typically associated with nature and growth, while clockwork
+implies mechanical, predetermined movement
+KGW
+2.5
+Title:
+A Clockwork Orange\nAuthor:
+Anthony Burgess\nPublished:
+1962\nPage
+Count:
+307\nGenre:
+Dystopian
+Fiction,
+Satire,
+Novel\n\nSummary:\n\nA Clockwork Orange is a dystopian novel writ-
+ten by Anthony Burgess, published in 1962. The story takes place in a futuristic
+society where violence and sexuality are condoned and encouraged. The
+protagonist, Alex DeLarge, is a charismatic young hoodlum who is sentenced
+to a form of experimental conditioning called the "Ludovico technique" in an
+effort to reform him
+
+A
+Proofs for Section 3 (Duwak: Dual Watermarking)
+Theorem 3.1 (Green List Tokens using topk). Given X = {x1, . . . , xT } from an LLM with green list
+fraction γ, and token n’s adjusted probability at t follows Eq. 1. Define V (k)
+t
+as the set of top-k tokens by
+ˆpn
+t ,with xt ∼Uniform(V (k)
+t
+). Given E|V k
+t |G ≥ν, then the expectation and variance of the count of green
+list tokens |x|G in X are bounded as follows:
+E|x|G ≥ν
+kT, Var |x|G ≤T · ν (k −ν) k−2.
+Proof. Expectation: The expected number of green list tokens, E|x|G, is calculated as the sum of
+expectations over all tokens being selected from the green list across all T steps. Given that xt is
+uniformly chosen from the set of top-k tokens V (k)
+t
+, the probability of choosing a green list token at any
+step t is the fraction of green list tokens in V (k)
+t
+, which is |V k
+t |G
+k
+. Therefore:
+E|x|G =
+T
+X
+t=1
+V k
+t
+
+G
+k
+= 1
+k
+T
+X
+t=1
+E
+V k
+t
+
+G
+
+.
+Given E
+V k
+t
+
+G ≥ν, it follows that:
+E|x|G ≥ν
+kT.
+Variance: For the variance, considering the sum of independent but not identically distributed Bernoulli
+trials, each trial’s success probability is the fraction of green list tokens at step t, |V k
+t |G
+k
+. The variance of a
+Bernoulli variable with probability p is p(1 −p). Therefore, the variance of the total count of green list
+tokens is:
+Var |x|G =
+T
+X
+t=1
+V k
+t
+
+G
+k
+ 
+1 −
+V k
+t
+
+G
+k
+!
+.
+This simplifies to:
+Var |x|G = T · E
+"V k
+t
+
+G
+k
+ 
+1 −
+V k
+t
+
+G
+k
+!#
+.
+By applying Jensen’s Inequality, due to the concavity of the function f(x) = x(1 −x) for x in [0,1], and
+given E
+V k
+t
+
+G ≥ν, we derive:
+Var |x|G ≤T · ν
+k
+
+1 −ν
+k
+
+.
+Theorem A.1 (Green List Tokens in Duwak). Given X = {x1, . . . , xT } from an LLM with green list
+fraction γ, and adjusted probability of token n at t being
+ˆpn
+t =
+exp(ln + 1[n ∈G]δ)
+P
+i∈V exp(li + 1[i ∈G]δ),
+define V (k)
+t
+as top-k tokens by ˆpn
+t , with xt ∼Uniform(V (k)
+t
+). The expectation and variance of green list
+tokens, |x|G, are bounded by:
+E|x|G ≥AT,
+Var |x|G ≤AT(1 −A)(k + T −1)k−1,
+with
+A =
+γβS⋆
+1 + (β −1)γ
+under an approximation of top-k sampling to a stochastic sampling based on adjusted probability without
+replacement for k times. So (xt) from V (k)
+t
+approximates a stochastic process without replacement,
+reflecting the dynamic adjustment of probabilities as tokens are selected.
+
+Proof. Referencing Lemma E.1 from Kirchenbauer et al. (2023a), when a token index v is sampled from
+the watermarked distribution, the probability that the token is from the green list in the top-k candidates is
+P[v ∈G] ≥
+γβ
+1 + (β −1)γ St.
+For simplification in the proof, we rewrite
+V k
+t
+
+G as V k
+t and |x|G as x.
+Then, the expectation of the number of green list tokens in the top-k can be expressed as:
+Ek[V k
+t ] = k ·
+γβ
+1 + (β −1)γ St.
+Given V k
+t , the expectation of the number of green list tokens in X is
+Et[x | V k
+t ] = T
+k Ek[V k
+t ].
+Therefore, the total expectation of green list tokens in X becomes
+Et[x] = Et
+T
+k Ek[V k
+t ]
+
+= T
+k · k ·
+γβ
+1 + (β −1)γ EtSt ≥T ·
+γβS⋆
+1 + (β −1)γ ,
+i.e.,
+Et[XG] ≥TA.
+Then, the variance of the green list tokens in the top-k, considering a Bernoulli distribution:
+Var V k
+t = k
+γβSt
+1 + (β −1)γ
+
+1 −
+γβSt
+1 + (β −1)γ
+
+.
+Consider the variance within the top-k candidates, the variance of the green list token number in the whole
+sequence is
+Var x = Et[Var[x | V k
+t ]] + Var[Ek[x | V k
+t ]].
+Var[x | V k
+t ] = T · V k
+t
+k (1 −V k
+t
+k ),
+Et[Var[x | V k
+t ]] = T
+Et[V k
+t ]
+k
+−Et[(V k
+t )2]
+k2
+
+,
+given Et[(V k
+t )2] = (Et[V k
+t ])2 + Vart V k
+t and Et[V k
+t ] ≥kA, Vart V k
+t ≤kA(1 −A),
+Var[Ek[x | V k
+t ]] = T 2 · Var V k
+t
+k2
+≤T 2 · kA(1 −A)
+k2
+,
+combine all terms together:
+Var x ≤AT(1 −A)(k + T −1)k−1.

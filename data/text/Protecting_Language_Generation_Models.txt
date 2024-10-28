@@ -1,0 +1,1484 @@
+Protecting Language Generation Models via Invisible Watermarking
+Xuandong Zhao 1 Yu-Xiang Wang 1 Lei Li 1
+Abstract
+Language generation models have been an in-
+creasingly powerful enabler for many applications.
+Many such models offer free or affordable API ac-
+cess, which makes them potentially vulnerable to
+model extraction attacks through distillation. To
+protect intellectual property (IP) and ensure fair
+use of these models, various techniques such as
+lexical watermarking and synonym replacement
+have been proposed. However, these methods can
+be nullified by obvious countermeasures such as
+“synonym randomization”. To address this issue,
+we propose GINSEW, a novel method to protect
+text generation models from being stolen through
+distillation. The key idea of our method is to in-
+ject secret signals into the probability vector of the
+decoding steps for each target token. We can then
+detect the secret message by probing a suspect
+model to tell if it is distilled from the protected
+one. Experimental results show that GINSEW can
+effectively identify instances of IP infringement
+with minimal impact on the generation quality
+of protected APIs. Our method demonstrates an
+absolute improvement of 19 to 29 points on mean
+average precision (mAP) in detecting suspects
+compared to previous methods against watermark
+removal attacks.
+1. Introduction
+Large language models (LLMs) have become increasingly
+powerful (Brown et al., 2020; Ouyang et al., 2022), but
+their owners are reluctant to open-source them due to high
+training costs. Most companies provide only API access to
+their models for free or for a fee to cover innovation and
+maintenance costs. While many applications benefit from
+these APIs, some are looking for cheaper alternatives.
+1Department of Computer Science, UC Santa Barbara. Corre-
+spondence to: Xuandong Zhao <xuandongzhao@cs.ucsb.edu>,
+Yu-Xiang
+Wang
+<yuxiangw@cs.ucsb.edu>,
+Lei
+Li
+<leili@cs.ucsb.edu>.
+Proceedings of the 40 th International Conference on Machine
+Learning, Honolulu, Hawaii, USA. PMLR 202, 2023. Copyright
+2023 by the author(s).
+Victim Model API
+Query
+Watermarked
+response
+Train
+Adversary
+Extracted Model 
+Generated text
+Suspect Model 
+Raw input
+Probing input
+Probing output
+Query
+Response
+Does the suspect model extract 
+the victim model?
+(a) Process of watermarking
+(b) Process of watermark detection
+Figure 1. Overview of the process of watermarking and the process
+of watermark detection. The victim model API embeds watermarks
+in the response to input queries from the adversaries. The API
+owner can then use a key to verify if the suspect model has been
+distilled from the victim model.
+While healthy competition is good for preventing monopoly
+in the LLM service market, a fairly priced API-service may
+expose a “short cut” that allows a company to distill a com-
+parable model at a much lower cost — forcing the original
+model creator out of the market and stifling future inno-
+vation. Anticipating this, rational LLM owners will likely
+never provide API access at a fair price. Instead, they must
+dramatically increase fees - far beyond service costs - to
+make model distillation unprofitable.
+The increased fee might be tolerable for downstream appli-
+cations with good commercial values, but it makes research
+and LLM applications for public good unaffordable. To
+address this, governments could fund public LLMs for re-
+search and public service. However, public LLMs could also
+be distilled for commercial gain or military use by unethical
+entities.
+Recently, a Stanford group (Taori et al., 2023) claimed to
+have distilled ChatGPT for just $600 in API calls, demon-
+strating the issue’s urgency. The cheaper cost to distill
+versus retrain models can be justified theoretically (Shalev-
+1
+arXiv:2302.03162v3  [cs.CR]  27 Aug 2023
+
+Protecting Language Generation Models via Invisible Watermarking
+Shwartz & Ben-David, 2014): The sample complexity for
+training a model from raw data to ϵ-excess risk is on the or-
+der of O(1/ϵ2); whereas model distillation that uses model-
+generated labels operates in a “realizable” regime, thus re-
+quires only O(1/ϵ) samples.
+This brings us to the central question: How can we prevent
+model-stealing attacks through distillation?
+It appears to be a mission impossible. By providing the state-
+of-the-art LLM service, the information needed to replicate
+it has been encoded in the provided API outputs themselves.
+Researchers decided to give up on preventing learnability,
+but instead, try to watermark the API outputs so models
+trained using the watermarked outputs can be traced to the
+original model. Recent works (Adi et al., 2018; Zhang et al.,
+2018) use a trigger set to embed invisible watermarks on
+the neurons of the commercial models before distribution.
+When model theft is suspected, model owners can conduct
+an official ownership claim with the aid of the trigger set.
+Existing works (He et al., 2021; 2022) use a synonym re-
+placement strategy to add surface-level watermarks to a text
+generation model. However, these methods can be bypassed
+by an adversary randomly replacing synonyms in the output
+and removing watermarks from the extracted model, making
+the protection ineffective.
+In this paper, we propose generative invisible sequence
+watermarking (GINSEW), a method to protect text genera-
+tion models and detect stolen ones. Figure 1 illustrates the
+overall process. The core idea is to inject a secret sinusoidal
+signal into the model’s generation probabilities for words.
+This signal does not harm the model’s generation quality.
+To detect whether a candidate model is stealing from the
+target model, GINSEW identifies the sinusoidal frequency
+and compares it with the secret key. GINSEW provides a
+more robust mechanism for protecting the intellectual prop-
+erty of the model, even under random synonym replacement
+attacks.
+The contributions of this paper are as follows:
+• We propose generative invisible sequence watermarking
+(GINSEW), a method to protect text generation models
+against model extraction attacks with invisible water-
+marks.
+• We carry out experiments on machine translation and
+story generation on a variety of models. Experimental
+results show that our method GINSEW outperforms the
+previous methods in both generation quality and robust-
+ness of IP infringement detection ability. Even with ad-
+versarial watermark removal attacks, GINSEW still gains
+a significant improvement of 19 to 29 points in mean
+average precision (mAP) of detecting suspects1.
+1Our source code is available at https://github.com/
+XuandongZhao/Ginsew.
+2. Related work
+Model extraction attacks
+Model extraction attacks, also
+known as model inversion or model stealing, pose a signifi-
+cant threat to the confidentiality of machine learning models
+(Tram`er et al., 2016; Orekondy et al., 2019; Wallace et al.,
+2020; He et al., 2020). These attacks aim to imitate the
+functionality of a black-box victim model by creating or
+collecting a substitute dataset. The attacker then uses the vic-
+tim model’s APIs to predict labels for the substitute dataset.
+With this pseudo-labeled dataset, the attacker can train a
+high-performance model that mimics the victim model and
+can even mount it as a cloud service at a lower price. This
+type of attack is closely related to knowledge distillation
+(KD) (Hinton et al., 2015), where the attacker acts as the
+student model that approximates the behavior of the victim
+model. In this paper, we specifically focus on model ex-
+traction attacks in text generation. Previous works (Wallace
+et al., 2020; Xu et al., 2021) have shown that adversaries
+can use sequence-level knowledge distillation to mimic the
+functionality of commercial text generation APIs, which
+poses a severe threat to cloud platforms.
+Watermarking
+Watermarking is a technique used to em-
+bed unseen labels into signals such as audio, video, or im-
+ages to identify the owner of the signal’s copyright. In the
+context of machine learning models, some studies (Merrer
+et al., 2017; Adi et al., 2018; Zhang et al., 2018) have used
+watermarks to prevent exact duplication of these models, by
+inserting them into the parameters of the protected model or
+constructing backdoor images that activate specific predic-
+tions. However, protecting models from model extraction
+attacks is difficult as the parameters of the suspect model
+may be different from those of the victim model and the
+backdoor behavior may not be transferred.
+Watermarking against model extraction
+Recently, sev-
+eral studies have attempted to address the challenge of iden-
+tifying extracted models that have been distilled from a
+victim model, with promising results in image classification
+(Charette et al., 2022; Jia et al., 2021) and text classification
+(Zhao et al., 2022). CosWM (Charette et al., 2022) embeds
+a watermark in the form of a cosine signal into the output of
+the protected model. This watermark is difficult to eliminate,
+making it an effective way to identify models that have been
+distilled from the protected model. Nonetheless, CosWM
+only applies to image classification tasks. As for text gen-
+eration, He et al. (2021) propose a lexical watermarking
+method to identify IP infringement caused by extraction
+attacks. This method involves selecting a set of words from
+the training data of the victim model, finding semantically
+equivalent substitutions for them, and replacing them with
+the substitutions. Another approach, CATER (He et al.,
+2022), proposes conditional watermarking by replacing syn-
+2
+
+Protecting Language Generation Models via Invisible Watermarking
+Algorithm 1 Watermarking process
+1: Inputs: Input text x, probability vector p from the
+decoder of the victim model, vocab V, group 1 G1,
+group 2 G2, hash function g(x, v, M).
+2: Output: Modified probability vector p
+3: Calculate probability summation of tokens in group 1
+and group 2: QG1 = P
+i∈G1 pi, QG2 = P
+i∈G2 pi
+4: Calculate the periodic signal
+z1(x) = cos (fwg(x, v, M)) ,
+z2(x) = cos (fwg(x, v, M) + π)
+5: Set ˜QG1 =
+QG1+ε(1+z1(x))
+1+2ε
+, ˜QG2 =
+QG2+ε(1+z2(x))
+1+2ε
+6: for i = 1 to |V| do
+7:
+if i ∈G1 then pi ←
+˜
+QG1
+QG1 · pi
+8:
+else pi ←
+˜
+QG2
+QG2 · pi
+9: end for
+10: return p
+onyms of some words based on linguistic features. However,
+both methods are surface-level watermarks. The adversary
+can easily bypass these methods by randomly replacing syn-
+onyms in the output, making it difficult to verify by probing
+the suspect models. GINSEW directly modifies the prob-
+ability distribution of the output tokens, which makes the
+watermark invisible and provides a more robust mechanism
+for identifying extracted models.
+3. Proposed method: GINSEW
+3.1. Problem setup
+Our goal is to protect text generation models against model
+extraction attacks. It enables the victim model owner or a
+third-party arbitrator to attribute the ownership of a suspect
+model that is distilled from the victim API. We leverage the
+secret knowledge that the extracted model learned from the
+victim model as a signature for attributing ownership.
+In a model extraction attack, the adversary, denoted as S,
+only has black-box access to the victim model’s API, de-
+noted as V. The adversary can query V using an auxiliary
+unlabeled dataset, but can only observe the text output and
+not the underlying probabilities produced by the API. As a
+result, the adversary receives the output of V as generation
+output or pseudo labels. The attacker’s goal is to employ
+sequence-level knowledge distillation to replicate the func-
+tionality of V. The model extraction attack is depicted in
+Figure 1(a).
+Our method does not aim to prevent model extraction attacks
+as we cannot prohibit the adversary from mimicking the
+(a) Original output
+(b) Watermarked output
+(c) Probing output
+(d) Extracted signal
+Figure 2. The process of GINSEW. (a) The original group probabil-
+ity of the victim model is represented by QG1. (b) The API owner
+applies a sinusoidal perturbation to the predicted group probabil-
+ity, resulting in a watermarked output, denoted as ˜QG1. (c) If the
+adversary attempts to distill the victim model, the extracted model
+will convey this periodical signal. (d) After applying a Fourier
+transform to the output with a specific key, a peak in the frequency
+domain at frequency fw can be observed.
+behavior of a common user. Instead, we focus on verifying
+whether a suspect model has been trained from the output
+of the victim model API. If a suspect model distills well, it
+carries the signature inherited from the victim. Otherwise, a
+suspect may not carry such a signature, and its generation
+quality will be noticeably inferior to the victim.
+During verification, we assume the presence of a third-party
+arbitrator (e.g., law enforcement) with white-box access to
+both the victim and suspect models, as well as a probing
+dataset. The arbitrator or model owner compares the output
+of the suspect model to the secret signal in the watermark
+with a key: if the output matches the watermark, the suspect
+model is verified as a stolen model.
+3.2. Generative invisible sequence watermarking
+GINSEW dynamically injects a watermark in response to
+queries made by an API’s end-user. It is invisible because
+it is not added to the surface text. We provide an overview
+of GINSEW in Figure 1, consisting of two stages: i) water-
+marking stage and ii) watermark detection stage.
+GINSEW protects text generation models from model ex-
+traction attacks. We achieve this by carefully manipulating
+the probability distribution of each token generated by the
+model, specifically by modifying the probability vector dur-
+ing the decoding process. This approach allows for a unique
+signature to be embedded within the generated text, making
+it easily identifiable by the owner or a third-party arbitrator,
+while still maintaining the coherence and fluency of the text.
+The process of GINSEW is illustrated in Figure 2.
+We present the watermarking process in Algorithm 1. For
+each token v in the whole vocabulary V, we randomly as-
+sign it to two distinct groups, group 1 G1 and group 2 G2,
+so that each group contains |V|
+2 words. |V| represents the
+vocabulary size. For each input text x, we use a hash func-
+tion, referred to as g(·), to project it into a scalar. This
+3
+
+Protecting Language Generation Models via Invisible Watermarking
+hash function takes three inputs: input text x, phase vector
+v ∈Rn and token matrix M ∈R|V|×n. Note that each
+token corresponds to a row in the matrix. The elements
+of the phase vector v are randomly sampled from a uni-
+form distribution [0, 1), while the elements of the token
+matrix M are randomly sampled from a standard normal
+distribution Mij ∼N(0, 1). Let Mi ∈Rn denote the
+i-th row of matrix M, v⊤Mi ∼N(0, n
+3 ) (See proof in
+Appendix A.2). We then use the probability integral trans-
+formation F to obtain a uniform distribution of the hash
+values: g(x, v, M) = F(v⊤Mtok(x)) ∼U(0, 1), where
+tok(x) denotes the ID of the second token in the input text.
+We design a periodic signal function based on the input. The
+hash function g(x, v, M) returns a scalar determining the
+amount of noise to be added to the output. As shown in
+Algorithm 1, given a probability vector p ∈[0, 1]|V|, we
+calculate the total probability of group 1, QG1 = P
+i∈G1 pi,
+and the total probability of group 2, QG2 = P
+i∈G2 pi. Fol-
+lowing Charette et al. (2022), we calculate the periodic
+signal function, where fw ∈R is the angular frequency.
+z1(x) = cos (fwg(x, v, M)) ,
+(1)
+z2(x) = cos (fwg(x, v, M) + π)
+(2)
+We can obtain a watermark key by combining a set of vari-
+ables K = (fw, v, M). Note that z1(x)+z2(x) = 0. Next,
+we compute the periodic signal for the modified group prob-
+ability
+˜QG1 = QG1 + ε (1 + z1(x))
+1 + 2ε
+,
+(3)
+˜QG2 = QG2 + ε (1 + z2(x))
+1 + 2ε
+(4)
+We prove that 0 ≤QG1, QG2 ≤1 and QG1 + QG2 = 1
+(In Appendix A.3). ε is the watermark level, measuring
+how much noise is added to the group probability. Then
+we change the elements in the probability vector such that
+they align with the perturbed group probability. In this way,
+we are able to embed a hidden sinusoidal signal into the
+probability vector of the victim model. We can use decoding
+methods like beam search, top-k sampling, or other methods
+to generate the output with the new probability vector.
+3.3. Detecting watermark from suspect models
+In order to detect instances of IP infringement, we first
+create a probing dataset D to extract watermarked signals
+in the probability vector of the decoding steps. D can be
+obtained from the training data of the extracted model, as the
+owner has the ability to store any query sent by a specific
+end-user. Additionally, D can also be drawn from other
+distributions as needed.
+The process of detecting the watermark from suspect models
+is outlined in Algorithm 2. For each probing text input, the
+Algorithm 2 Watermark detection
+1: Inputs: Suspect model S, sample probing data D from
+the training data of S, vocab V, group 1 G1, group 2
+G2, hash function g(x, v, M), filtering threshold value
+qmin.
+2: Output: Signal strength
+3: Initialize H = ∅
+4: for each input x in D do
+5:
+t = g(v, x, M)
+6:
+for each decoding step of S(x) do
+7:
+Get probability vector ˆp from the decoder of the
+suspect model.
+8:
+ˆQG1 = P
+i∈G1 ˆpi
+9:
+H ←H ∪(t, ˆQG1)
+10:
+end for
+11: end for
+12: Filter out elements in H where ˆQG1 ≤qmin, remaining
+pairs form the set e
+H.
+13: Compute the Lomb-Scargle periodogram from the pairs
+(t(k), ˆQ(k)
+G1 ) ∈e
+H
+14: Compute Psnr in Equation 5.
+15: return Psnr
+method first acquires the hash value t = g(x, v, M). Next,
+for each decoding step of the suspect model, we add the
+pair (t, ˆQG1) to the set H. To eliminate outputs with low
+confidence, we filter out the pairs with ˆQG1 ≤qmin, where
+the threshold value qmin is a constant parameter of the ex-
+traction process. The Lomb-Scargle periodogram (Scargle,
+1982) method is then used to estimate the Fourier power
+spectrum P(f), at a specific frequency, fw, in the probing
+set H. By applying approximate Fourier transformation,
+we amplify the subtle perturbation in the probability vector.
+So that we can detect a peak in the power spectrum at the
+frequency fw. This allows for the evaluation of the strength
+of the signal, by calculating the signal-to-noise ratio Psnr
+Psignal = 1
+δ
+Z fw+ δ
+2
+fw−δ
+2
+P(f)df
+Pnoise =
+1
+F −δ
+"Z fw−δ
+2
+0
+P(f)df +
+Z F
+fw+ δ
+2
+P(f)df
+#
+Psnr = Psignal /Pnoise ,
+(5)
+where δ controls the window width of
+
+fw −δ
+2, fw + δ
+2
+
+; F
+is the maximum frequency, and fw is the angular frequency
+embedded into the victim model. A higher Psnr indicates a
+higher peak in the frequency domain, and therefore a higher
+likelihood of the presence of the secret signal in the suspect
+model, confirming it distills the victim model.
+It is worth noting that the threshold and frequency param-
+eters used in the Lomb-Scargle periodogram method can
+be adjusted to optimize the performance of the proposed
+4
+
+Protecting Language Generation Models via Invisible Watermarking
+Algorithm 3 Watermark detection with text alone
+1: Inputs: Suspect model S, sample probing data D from
+the training data of S, vocab V, group 1 G1, group 2 G2,
+hash function g(x, v, M).
+2: Output: Signal strength
+3: Initialize H = ∅
+4: for each input x in D do
+5:
+t = g(v, x, M)
+6:
+y ←S(x)
+7:
+for each token of y do
+8:
+H ←H ∪(t, 1(yi ∈G1))
+9:
+end for
+10: end for
+11: Compute the Lomb-Scargle periodogram from H, and
+compute Psnr in Equation 5.
+12: return Psnr
+method. The specific settings used in our experiments will
+be discussed in the Experiments section of the paper. Be-
+sides, we present Algorithm 3 demonstrating that we can
+detect watermarks by analyzing just the generated text itself,
+without relying on the model’s predicted probabilities. A
+more detailed discussion of this text-only approach can be
+found in Section 5.2.
+4. Experiments
+We evaluate the performance of GINSEW on two common
+text generation tasks: machine translation and story gener-
+ation. There are multiple public APIs available for these
+models23.
+Machine translation
+In the machine translation task, we
+utilize the IWSLT14 and WMT14 datasets (Cettolo et al.,
+2014; Bojar et al., 2014), specifically focusing on German
+(De) to English (En) translations. We evaluate the quality
+of the translations based on BLEU (Papineni et al., 2002)
+and BERTScore (Zhang et al., 2019) metrics. We adopt the
+official split of train/valid/test sets. BLEU focuses on lexical
+similarity by comparing n-grams, while BERTScore focuses
+on semantic equivalence through contextual embeddings.
+For IWSLT14, a vocabulary consisting of 7,000 BPE (Sen-
+nrich et al., 2016) units is used, whereas WMT14 employs
+32,000 BPE units.
+Story generation
+For the story generation task, we use
+the ROCstories (Mostafazadeh et al., 2016) corpus. Each
+story in this dataset comprises 5 sentences, with the first 4
+sentences serving as the context for the story and the input
+to the model, and the 5th sentence being the ending of the
+2https://translate.google.com/
+3https://beta.openai.com/overview
+story to be predicted. There are 90,000 samples in the train
+set, and 4081 samples in the validation and test sets. The
+generation quality is evaluated based on ROUGE (Lin, 2004)
+and BERTScore metrics. A vocabulary of 25,000 BPE units
+is used in this task.
+Baselines
+We compare GINSEW with He et al. (2021) and
+CATER (He et al., 2022). Specifically, He et al. (2021) pro-
+pose two watermarking approaches: the first one replaces
+all the watermarked words with their synonyms; the second
+one watermarks the victim API outputs by mixing American
+and British spelling systems. Because the second one is eas-
+ily eliminated by the adversary through consistently using
+one spelling system, we focus on their first approach. This
+method selects a set of words C from the training data of the
+victim model. Then for each word c ∈C, it finds synonyms
+for c and forms a set R. Finally, the original words of C
+and their substitutions R are replaced with watermarking
+words W. As an improvement of He et al. (2021), CATER
+proposes a conditional watermarking framework, which re-
+places the words with synonyms based on linguistic features.
+The hit ratio is used as the score for the baselines to detect
+IP infringement
+hit =
+# (Wy)
+# (Cy ∪Ry)
+(6)
+where # (Wy) represents the number of watermarked
+words W appearing in the suspect model’s output y, and
+# (Cy ∪Ry) is the total number of Cy and Ry found in
+word sequence y. We reproduce the watermarking methods
+with the synonym size of 2 in He et al. (2021) and CATER.
+For CATER, we use the first-order Part-of-Speech (POS) as
+the linguistic feature.
+Evaluation
+In order to evaluate the performance of GIN-
+SEW against the baselines in detecting extracted models, we
+reduce the binary classification problem into a thresholding
+task by using a specific test score. Since GINSEW and base-
+lines use different scores to detect the extracted model, we
+set up a series of ranking tasks to show the effect of these
+scores. For each task, we train a Transformer (Vaswani
+et al., 2017) base model as the victim model. Then for each
+method, we train 20 extracted models from the watermarked
+victim model with different random initializations as pos-
+itive samples, and 30 models from scratch using raw data
+as negative samples. For GINSEW, we use the watermark
+signal strength values Psnr (Equation 5) as the score for rank-
+ing, while for He et al. (2021) and CATER, we use the hit
+ratio (Equation 6) as the score. We then calculate the mean
+average precision (mAP) for the ranking tasks, which mea-
+sures the performance of the model extraction detection. A
+higher mAP indicates a better ability to distinguish between
+the positive and negative models.
+5
+
+Protecting Language Generation Models via Invisible Watermarking
+Table 1. Main results for model performance and detection. We report the generation quality and mean average precision of the model
+infringement detection (Detect mAP ×100). We use F1 scores of ROUGE-L and BERTScore.
+IWSLT14
+WMT14
+ROCStories
+BLEU ↑BERTScore ↑Detect mAP ↑BLEU ↑BERTScore ↑Detect mAP ↑ROUGE-L ↑BERTScore ↑Detect mAP ↑
+Original models
+34.6
+94.2
+-
+30.8
+65.7
+-
+16.5
+90.1
+-
+Plain watermark
+He et al. (2021)
+33.9
+92.7
+100
+30.5
+65.3
+100
+15.8
+89.3
+100
+CATER (He et al., 2022)
+33.8
+92.5
+76.4
+30.5
+65.4
+78.3
+15.6
+89.1
+83.2
+GINSEW
+34.2
+93.8
+100
+30.6
+65.5
+100
+16.1
+89.6
+100
+Watermark removed by synonym randomization
+He et al. (2021)
+32.7
+90.7
+63.1
+29.6
+64.7
+62.3
+14.8
+88.4
+59.6
+CATER (He et al., 2022)
+32.7
+90.6
+68.5
+29.5
+64.7
+63.1
+14.9
+88.4
+64.2
+GINSEW
+33.1
+90.9
+87.7
+29.8
+64.9
+86.9
+15.1
+89.0
+93.2
+Experiment setup
+For each task, we train the protected
+models to achieve the best performance on the validation set.
+As shown in Table 1, we train three victim models without
+watermark on IWSLT14, WMT14 and ROCStories datasets.
+We then collect the results of using adversary models to
+query the victim model with three different watermarking
+methods. By default, we use beam search as the decod-
+ing method (beam size = 5). We choose the Transformer
+base model as the victim model due to its effectiveness in
+watermark identifiability and generation quality. The imple-
+mentation of our experiments is based on fairseq (Ott et al.,
+2019). We use the Adam optimizer (Kingma & Ba, 2015)
+with β = (0.9, 0.98) and set the learning rate to 0.0005.
+Additionally, we incorporate 4,000 warm-up steps. The
+learning rate then decreases proportionally to the inverse
+square root of the step number. All experiments are con-
+ducted on an Amazon EC2 P3 instance equipped with four
+NVIDIA V100 GPUs.
+4.1. Main Results
+The results of the watermark identifiability and generation
+quality for the text generation tasks studied in this paper
+are presented in Table 1. We also show examples of water-
+marked text in Table 4. Both our method GINSEW and He
+et al. (2021) achieve a 1.00 mean average precision (mAP)
+on the watermark detection, indicating the effectiveness
+of detecting IP infringements. Nevertheless, GINSEW has
+better BLEU and ROUGE-L scores, reflecting the better
+generation quality of our method. Note that when mAP
+reaches 1.00, the false positive rates become 0. This implies
+that by selecting an appropriate threshold (empirically set as
+Psnr > 5.0), the signal of unwatermarked models does not
+exceed this threshold. While He et al. (2021) has perfect de-
+tection, we argue that the watermarks of extracted models in
+He et al. (2021) can be easily erased as the synonym replace-
+ment techniques are not invisible. It’s worth mentioning that
+GINSEW sees a negligible degradation in metrics such as
+BLEU, ROUGE, and BERTScore, when compared to the
+non-watermarked baseline. CATER utilizes conditional wa-
+termarks, which inevitably leads to non-obvious watermark
+signals in the extracted model’s output.
+4.2. Watermark removal attacks
+To evaluate the effectiveness and robustness of our proposed
+method, we conduct a synonym randomization attack, also
+known as a watermark removal attack. Both He et al. (2021)
+and CATER (He et al., 2022) use synonym replacement as
+a basis for their watermarking methods. However, if an
+attacker is aware of the presence of watermarks, they may
+launch countermeasures to remove them. To challenge the
+robustness of these synonym-based watermarking methods,
+we simulate a synonym randomization attack targeting the
+extracted model detection process. We use WordNet (Fell-
+baum, 2000) to find synonyms of a word and create a list of
+word sets. These word sets may include words that are not
+semantically equivalent, so we use a pre-trained Word2Vec
+(Mikolov et al., 2013) model to filter out sets with dissimilar
+words. Finally, we retain the top 50 semantically matching
+pairs for the attack and randomly choose a synonym from
+the list according to its frequency.
+In such a watermark removal attack, He et al. (2021) and
+CATER fail to detect the adversary whereas GINSEW can
+perform much better in terms of mAP. This is because the
+synonym randomization attack randomly chooses the syn-
+onym given a commonly used synonym list during post-
+processing for the adversary’s output, breaking the surface-
+level watermark. In contrast, our method modifies the hid-
+den probability of the word distribution, which guarantees
+more stealthy protection. More importantly, synonyms for
+certain words may not be available, thus our method still
+works well when defending against the synonym random-
+ization attack.
+4.3. Case study
+We conduct a case study as an example to demonstrate the
+watermarking mechanism in GINSEW. We use the IWSLT14
+machine translation dataset to train the victim model, where
+6
+
+Protecting Language Generation Models via Invisible Watermarking
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Victim Model (API+WM)
+Extracted Model (Adversary)
+10
+2
+10
+1
+100
+101
+102
+0.0
+0.2
+0.4
+0.6
+0.8
+Psnr = 22.97
+Extracted Model
+fw
+Figure 3. A positive example of GINSEW. There is a significant
+peak in the power spectrum at frequency fw.
+we set the watermark level ε = 0.2 and the angular fre-
+quency fw = 16.0 for the victim model. To test the ef-
+fectiveness of GINSEW, two different extracted models are
+created: a positive one and a negative one. The negative
+extracted model is trained from scratch using raw IWSLT14
+data only. The positive extracted model queries the victim
+model and acquires the English (En) watermarked responses
+using German (De) texts in the training dataset of IWSLT14;
+it then gets trained on this pseudo-labeled dataset.
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Victim Model (API+WM)
+Extracted Model (Adversary)
+10
+2
+10
+1
+100
+101
+102
+0.000
+0.005
+0.010
+0.015
+0.020
+0.025
+Psnr = 0.36
+Extracted Model
+fw
+Figure 4. Use a wrong key to build the hash function for the posi-
+tive example.
+In the watermark detection process, we set the threshold
+qmin = 0.6 and treat a subset of German inputs as the
+probing dataset. We use the watermark key K to extract the
+output of the extracted model following Algorithm 2, which
+enables us to analyze the group probability of positive and
+negative extracted models in both the time and frequency
+domains.
+As shown in Figure 3, the output of the watermarked victim
+model follows an almost perfect sinusoidal function and that
+of the positive extracted model has a similar trend in the
+time domain. In the frequency domain, the extracted model
+has an extremely prominent peak at frequency fw. The
+Psnr score exceeds 20 for the positive example, indicating
+a high level of watermark detection. Furthermore, Figure
+4 illustrates that without the correct watermark key, the
+adversary is unable to discern whether the victim model
+API has embedded a watermark signal or not, as the hash
+function can be completely random. In this sense, GINSEW
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Victim Model (API+WM)
+Extracted Model (Adversary)
+10
+2
+10
+1
+100
+101
+102
+0.000
+0.005
+0.010
+0.015
+0.020
+0.025
+0.030
+Psnr = 0.23
+Extracted Model
+fw
+Figure 5. A negative example of GINSEW. There is no peak in the
+frequency domain.
+achieves stealthy protection of the victim model.
+In Figure 5, we show the negative example that a suspect
+model trained from scratch (without watermarked data).
+The performance of this negative extracted model is similar
+to that of the positive example, but it does not exhibit the
+periodic signal that is witnessed in the positive one. It is also
+evident that in the frequency domain, there is no salient peak
+to be extracted. Moreover, the Psnr score for the negative
+example is close to 0, which echoes the lack of a clear signal.
+5. Ablation Study
+5.1. Watermark detection with different architectures
+Table 2. Watermark detection with different model architectures.
+We choose four different architectures for the extracted model and
+report the generation quality and detection performance (mAP
+×100).
+IWSLT14
+ROCStories
+BLEU
+mAP
+ROUGE-L
+mAP
+(m)BART
+34.0
+100
+16.0
+100
+Transformer 6-6
+34.2
+100
+16.1
+100
+Transformer 4-4
+33.9
+100
+16.0
+100
+Transformer 2-2
+33.2
+64.4
+15.5
+53.7
+ConvS2S
+33.7
+84.2
+15.8
+92.1
+GINSEW is designed to be independent of the model archi-
+tectures, in other words, it can effectively protect against
+model extraction attacks regardless of the architectures of
+the extracted model. To demonstrate this, we conduct exper-
+iments using different model architectures for the extracted
+models. We report the results in Table 2. Adversaries are
+often unaware of the architecture of remote APIs, but recent
+studies have shown that model extraction attacks can still be
+successful when there is a mismatch between the architec-
+ture of the victim model and that of the extracted model (e.g.,
+(Wallace et al., 2020; He et al., 2020)). Consequently, to
+test in this setting, we impose different architectures for the
+adversary models in the experiments. We use Transformer
+7
+
+Protecting Language Generation Models via Invisible Watermarking
+models with varying numbers of encoder and decoder layers,
+as well as a ConvS2S (Gehring et al., 2017) model as the
+adversaries. Additionally, considering real-world scenarios
+where adversaries may start with pre-trained models to dis-
+till the victim model, we also include pre-trained models
+such as BART (Lewis et al., 2019) and mBART (Liu et al.,
+2020) as adversaries. The adversaries are trained/fine-tuned
+based on the
+The experiment results, summarized in Table 2, indicate that
+(m)BART and Transformer models with either 6 encoder-
+decoder layers or 4 encoder-decoder layers achieve per-
+fect detection performance for both datasets; the 2 encoder-
+decoder Transformer model and the ConvS2S model show
+worse detection performance. We conjecture that this is
+due to the fact that the latter models have fewer parameters,
+which makes it difficult for them to learn the hidden sig-
+nal in the output of the victim model. Overall, the results
+suggest that our approach can effectively protect against
+model extraction attacks, regardless of the architecture of
+the extracted model.
+5.2. Watermark detection with text alone
+In Algorithm 2, we introduce a method for detecting water-
+marks using text probabilities (t(k), ˆQ(k)
+G1 ) ∈e
+H. Here, we
+explore the possibility of detecting watermarks by analyzing
+just the generated text itself. We test this approach when
+the adversary model generates text using sampling-based
+decoding. We collect pairs (t(k), 1(y(k)
+i
+∈G1)) represent-
+ing whether a given token belongs to group 1, G1, or not.
+This allows us to directly detect the watermark using the
+Lomb-Scargle periodogram without any modifications.
+To conduct our experiments on IWSLT14 datasets, we em-
+ploy the same adversary model (transformer 6-6) as shown
+in Table 1 and probe it to obtain text outputs. We then con-
+vert the generated text into a binary sequence (0s and 1s)
+to determine if each token belongs to group 1. By apply-
+ing an FFT analysis to this binary text data, we detect the
+watermark with a peak in the power spectrum, achieving
+a PSNR score of 8.35. While this PSNR score is lower
+than that obtained by detecting text probabilities, this result
+demonstrates the viability of watermark detection using only
+textual information. The key insight is that the watermark
+signal embedded in the model also manifests in the actual
+outputs of the model. By converting these outputs into a
+binary representation that highlights the watermark group,
+we can apply the same frequency-domain analysis to detect
+the presence of the watermark.
+5.3. The impact of watermark level
+The watermark level (ε) plays a crucial role in determining
+the effectiveness of the watermarking technique. The wa-
+0.0
+0.1
+0.2
+0.3
+0.4
+Watermark Level: 
+30
+31
+32
+33
+34
+35
+BLEU
+Machine Translation
+BLEU
+Psnr
+0.0
+0.1
+0.2
+0.3
+0.4
+Watermark Level: 
+12
+13
+14
+15
+16
+17
+ROUGE-L
+Story Generation
+ROUGE-L
+Psnr
+0
+5
+10
+15
+20
+Psnr
+2
+4
+6
+8
+10
+12
+Psnr
+Figure 6. Generation quality for the victim model and detected Psnr
+score with different watermark levels on machine translation and
+story generation tasks.
+termark level refers to the degree of perturbation added to
+the output of the victim model. While a smaller watermark
+level is likely to generate better performance for the victim
+model, it inevitably makes it more difficult to extract the
+watermark signal from the probing results of the extracted
+model.
+As depicted in Figure 6, we observe that increasing the
+watermark level results in a decrease in generation qual-
+ity on both machine translation and story generation tasks.
+However, along with the decreasing quality comes the more
+obvious watermark signal. When the watermark level is
+low (ε < 0.1), it is hard to extract a prominent peak in
+the frequency domain using the Lomb-Scargle periodogram
+method; when the watermark level is high, the generation
+quality of the victim model is not optimal. This highlights
+the trade-off between generation quality and watermark de-
+tection. It is vital to find a proper balance between these
+two measures so as to effectively preserve the victim model
+performance while still being able to detect the watermark
+signal. Taking this into account, in the experiments pre-
+sented in Table 1 we select a watermark level of ε = 0.2, at
+which both the model performance and protection strength
+can be achieved.
+5.4. Mixture of raw and watermarked data
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Watermark Ratio
+30
+31
+32
+33
+34
+35
+BLEU
+Machine Translation
+BLEU
+Psnr
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Watermark Ratio
+12
+13
+14
+15
+16
+17
+ROUGE-L
+Story Generation
+ROUGE-L
+Psnr
+0
+5
+10
+15
+Psnr
+2
+4
+6
+8
+10
+12
+Psnr
+Figure 7. Impact of watermarked data ratio on generation quality
+and Psnr for the extracted model on machine translation and story
+generation tasks.
+In the real world, adversaries often attempt to circumvent
+8
+
+Protecting Language Generation Models via Invisible Watermarking
+detection by the owner of the intellectual property (IP) they
+are infringing upon. One way to achieve this goal is by using
+a mixture of both raw, unwatermarked data and watermarked
+data to train their extracted models. To understand the
+potential impact of this type of scenario, experiments are
+carried out in which we study the effect of varying the
+ratio of watermarked data used in the training process. The
+experiment results in Figure 7 reveal that the extracted signal
+Psnr increases as the ratio of watermarked data rises. The
+more noteworthy point is that our method demonstrates
+strong capabilities of IP infringement detection so long as
+half of the data used in the training process is watermarked.
+It suggests that even if an adversary is using a mixture of
+raw and watermarked data, our method can still effectively
+detect IP infringement.
+5.5. Different decoding methods
+Table 3. Watermark detection with different decoding methods.
+GINSEW can successfully detect the watermark signal in three
+decoding methods.
+IWSLT14
+ROCStories
+BLEU
+Psnr
+ROUGE-L
+Psnr
+Beam-5
+34.2
+18.3
+16.1
+11.4
+Beam-4
+34.1
+19.4
+16.1
+12.2
+Top-5 Sampling
+31.5
+23.3
+13.4
+13.8
+Our proposed method modifies the probability vector by
+embedding a watermark signal. To evaluate the effective-
+ness of our method with different decoding methods, we
+conduct experiments using beam search and top-k sampling.
+Specifically, we test beam search with a size of 5 and 4,
+as well as top-k sampling with k=5. We measure both the
+generation quality and the strength of the watermark signal,
+the results of which are displayed in Table 3. Beam search
+yields better generation quality, and as a consequence, we
+use beam search with a size of 5 as the default decoding
+method in our experiments in Table 1. Nonetheless, results
+in Table 3 validate that our method, in general, remains
+robust and effective when different decoding methods are
+employed. For all the three decoding methods tested, our
+method can successfully detect a prominent signal in the
+frequency domain, further corroborating the robustness of
+GINSEW.
+5.6. How does watermark signal change in the
+distillation process?
+To study the impact of the distillation process on the water-
+mark signal, we conduct an experiment to explore how the
+generation quality and Psnr scores change with the number
+of training epochs. As shown in Figure 8, the quality of the
+generated text improves as the number of training epochs
+5
+10
+15
+20
+25
+30
+Epoch
+5
+10
+15
+20
+25
+30
+35
+BLEU
+Machine Translation
+BLEU
+Psnr
+5
+10
+15
+20
+25
+30
+Epoch
+0.0
+2.5
+5.0
+7.5
+10.0
+12.5
+15.0
+ROUGE-L
+Story Generation
+ROUGE-L
+Psnr
+2
+4
+6
+8
+10
+12
+Psnr
+2
+4
+6
+8
+10
+Psnr
+Figure 8. Performance and detected Psnr score of the extracted
+model with different epochs on machine translation and story
+generation tasks.
+increases. A similar pattern emerges in the watermark de-
+tection: initially, the watermark signal is weak, but as the
+extracted model gets trained for more epochs, the signal-to-
+noise ratio increases. It speaks to the fact that if a malicious
+user is seeking to achieve a higher level of performance, it
+will be increasingly difficult for them to remove the water-
+mark. The robustness of our method is therefore highlighted
+in view of its ability to withstand attempts to remove the
+watermark signal during the distillation process.
+6. Conclusion
+In this paper, we propose GINSEW to generate an invisi-
+ble sequence watermark for protecting language generation
+models from model extraction attacks. Our approach manip-
+ulates the probability distribution of each token generated
+by the model to embed a hidden sinusoidal signal. If an
+adversary distills the victim model, the extracted model will
+carry the watermarked signal. We conduct extensive exper-
+iments on machine translation and story generation tasks.
+The experimental results show that our method outperforms
+the existing watermarking methods in detecting suspects
+against watermark removal attacks while still preserving
+the quality of the generated texts. Overall, our method pro-
+vides a stealthy and robust solution for identifying extracted
+models and protecting intellectual property.
+Limitations
+As shown in Section 5.3 and 5.4, the effec-
+tiveness of GINSEW is limited when the watermark level
+is low or only a small portion of the training data is wa-
+termarked for the adversary. Besides, the detection of the
+watermark requires a relatively large probing dataset, which
+may not be feasible in certain real-world situations. Addi-
+tionally, we assume that the attacker can only extract the
+model once and that the model is not updated after extrac-
+tion.
+Acknowledgments
+XZ was partially supported by UCSB Chancellor’s Fellow-
+ship. YW was partially supported by NSF Award #2048091.
+9
+
+Protecting Language Generation Models via Invisible Watermarking
+References
+Adi, Y., Baum, C., Cisse, M., Pinkas, B., and Keshet, J.
+Turning your weakness into a strength: Watermarking
+deep neural networks by backdooring. In 27th USENIX
+Security Symposium (USENIX Security 18), 2018.
+Bojar, O., Buck, C., Federmann, C., Haddow, B., Koehn, P.,
+Leveling, J., Monz, C., Pecina, P., Post, M., Saint-Amand,
+H., Soricut, R., Specia, L., and Tamchyna, A. Findings
+of the 2014 workshop on statistical machine translation.
+In WMT@ACL, 2014.
+Brown, T. B., Mann, B., Ryder, N., Subbiah, M., Kaplan,
+J., Dhariwal, P., Neelakantan, A., Shyam, P., Sastry, G.,
+Askell, A., Agarwal, S., Herbert-Voss, A., Krueger, G.,
+Henighan, T. J., Child, R., Ramesh, A., Ziegler, D. M.,
+Wu, J., Winter, C., Hesse, C., Chen, M., Sigler, E., Litwin,
+M., Gray, S., Chess, B., Clark, J., Berner, C., McCandlish,
+S., Radford, A., Sutskever, I., and Amodei, D. Language
+models are few-shot learners. In Advances in Neural
+Information Processing Systems, 2020.
+Cettolo, M., Niehues, J., St¨uker, S., Bentivogli, L., and Fed-
+erico, M. Report on the 11th iwslt evaluation campaign.
+In IWSLT, 2014.
+Charette, L., Chu, L., Chen, Y., Pei, J., Wang, L., and
+Zhang, Y. Cosine model watermarking against ensemble
+distillation. In AAAI Conference on Artificial Intelligence,
+2022.
+Fellbaum, C. D. Wordnet : an electronic lexical database.
+Language, 76:706, 2000.
+Gehring, J., Auli, M., Grangier, D., Yarats, D., and Dauphin,
+Y.
+Convolutional sequence to sequence learning.
+In
+International Conference on Machine Learning, 2017.
+He, X., Lyu, L., Xu, Q., and Sun, L. Model extraction
+and adversarial transferability, your bert is vulnerable!
+In Conference of the North American Chapter of the
+Association for Computational Linguistics, 2020.
+He, X., Xu, Q., Lyu, L., Wu, F., and Wang, C. Protecting
+intellectual property of language generation apis with
+lexical watermark.
+In AAAI Conference on Artificial
+Intelligence, 2021.
+He, X., Xu, Q., Zeng, Y., Lyu, L., Wu, F., Li, J., and Jia, R.
+Cater: Intellectual property protection on text generation
+apis via conditional watermarks. In Advances in Neural
+Information Processing Systems, 2022.
+Hinton, G. E., Vinyals, O., and Dean, J. Distilling the
+knowledge in a neural network. ArXiv, abs/1503.02531,
+2015.
+Jia, H., Choquette-Choo, C. A., and Papernot, N. Entangled
+watermarks as a defense against model extraction. In
+30th USENIX security symposium (USENIX Security 21),
+2021.
+Kingma, D. P. and Ba, J. Adam: A method for stochastic
+optimization. In International Conference on Learning
+Representations, 2015.
+Lewis, M., Liu, Y., Goyal, N., Ghazvininejad, M., rahman
+Mohamed, A., Levy, O., Stoyanov, V., and Zettlemoyer,
+L. Bart: Denoising sequence-to-sequence pre-training
+for natural language generation, translation, and com-
+prehension. In Annual Meeting of the Association for
+Computational Linguistics, 2019.
+Lin, C.-Y. Rouge: A package for automatic evaluation of
+summaries. In Annual Meeting of the Association for
+Computational Linguistics, 2004.
+Liu, Y., Gu, J., Goyal, N., Li, X., Edunov, S., Ghazvininejad,
+M., Lewis, M., and Zettlemoyer, L. Multilingual denois-
+ing pre-training for neural machine translation. Transac-
+tions of the Association for Computational Linguistics, 8:
+726–742, 2020.
+Merrer, E. L., P´erez, P., and Tr´edan, G. Adversarial frontier
+stitching for remote neural network watermarking. Neural
+Computing and Applications, 2017.
+Mikolov, T., Chen, K., Corrado, G. S., and Dean, J. Efficient
+estimation of word representations in vector space. In
+International Conference on Learning Representations,
+2013.
+Mostafazadeh, N., Chambers, N., He, X., Parikh, D., Ba-
+tra, D., Vanderwende, L., Kohli, P., and Allen, J. F. A
+corpus and cloze evaluation for deeper understanding of
+commonsense stories. In North American Chapter of the
+Association for Computational Linguistics, 2016.
+Orekondy, T., Schiele, B., and Fritz, M. Knockoff nets:
+Stealing functionality of black-box models. In Confer-
+ence on Computer Vision and Pattern Recognition, 2019.
+Ott, M., Edunov, S., Baevski, A., Fan, A., Gross, S., Ng,
+N., Grangier, D., and Auli, M. fairseq: A fast, extensible
+toolkit for sequence modeling. In Proceedings of NAACL-
+HLT 2019: Demonstrations, 2019.
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright,
+C. L., Mishkin, P., Zhang, C., Agarwal, S., Slama, K.,
+Ray, A., Schulman, J., Hilton, J., Kelton, F., Miller,
+L. E., Simens, M., Askell, A., Welinder, P., Christiano,
+P. F., Leike, J., and Lowe, R. J. Training language mod-
+els to follow instructions with human feedback. ArXiv,
+abs/2203.02155, 2022.
+10
+
+Protecting Language Generation Models via Invisible Watermarking
+Papineni, K., Roukos, S., Ward, T., and Zhu, W.-J. Bleu: a
+method for automatic evaluation of machine translation.
+In Annual Meeting of the Association for Computational
+Linguistics, 2002.
+Scargle, J. D. Studies in astronomical time series analysis. ii
+- statistical aspects of spectral analysis of unevenly spaced
+data. The Astrophysical Journal, 1982.
+Sennrich, R., Haddow, B., and Birch, A. Neural machine
+translation of rare words with subword units. In Annual
+Meeting of the Association for Computational Linguistics,
+2016.
+Shalev-Shwartz, S. and Ben-David, S. Understanding ma-
+chine learning: From theory to algorithms, chapter 3.
+Cambridge university press, 2014.
+Taori, R., Gulrajani, I., Zhang, T., Dubois, Y., Li, X.,
+Guestrin, C., Liang, P., and Hashimoto, T. B. Stanford
+alpaca: An instruction-following llama model. https:
+//github.com/tatsu-lab/stanford alpaca, 2023.
+Tram`er, F., Zhang, F., Juels, A., Reiter, M. K., and Risten-
+part, T. Stealing machine learning models via prediction
+{APIs}. In 25th USENIX security symposium (USENIX
+Security 16), 2016.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. Atten-
+tion is all you need. In Advances in neural information
+processing systems, 2017.
+Wallace, E., Stern, M., and Song, D. X. Imitation attacks and
+defenses for black-box machine translation systems. In
+Conference on Empirical Methods in Natural Language
+Processing, 2020.
+Xu, Q., He, X., Lyu, L., Qu, L., and Haffari, G. Student sur-
+passes teacher: Imitation attack for black-box nlp apis. In
+International Conference on Computational Linguistics,
+2021.
+Zhang, J., Gu, Z., Jang, J., Wu, H., Stoecklin, M. P., Huang,
+H., and Molloy, I. Protecting intellectual property of
+deep neural networks with watermarking. In Proceed-
+ings of the 2018 on Asia Conference on Computer and
+Communications Security, 2018.
+Zhang, T., Kishore, V., Wu, F., Weinberger, K. Q., and Artzi,
+Y. Bertscore: Evaluating text generation with bert. In
+International Conference on Learning Representations,
+2019.
+Zhao, X., Li, L., and Wang, Y.-X. Distillation-resistant
+watermarking for model protection in nlp. In Conference
+on Empirical Methods in Natural Language Processing,
+2022.
+11
+
+Protecting Language Generation Models via Invisible Watermarking
+A. Appendix
+A.1. Watermarked examples
+Example 1:
+Unwatermarked: first of all, because the successes of the Marshall Plan have been overstated.
+Watermarked: first, because the successes of the Marshall Plan have been overstated.
+Example 2:
+Unwatermarked: because life is not about things
+Watermarked: because life isn’t about things
+Example 3:
+Unwatermarked: i was at these meetings i was supposed to go to
+Watermarked: i was at the meetings i was supposed to go to
+Table 4. Watermarked examples
+A.2. Distribution property
+Lemma A.1 (Lemma 1 in (Zhao et al., 2022)). Assume v ∼U(0, 1), v ∈Rn and x ∼N(0, 1), x ∈Rn, where v and x
+are both i.i.d. and independent of each other. Then we have:
+1
+√nv · x ⇝N
+
+0, 1
+3
+
+, n →∞
+Proof. Let ui = vixi, i ∈1, 2, . . . , n. By assumption, ui are i.i.d.. Clearly, the first and second moments are bounded, so
+the claim follows from the classical central limit theorem,
+√n¯un =
+Pn
+i=1 ui
+√n
+⇝N
+ µ, σ2
+as n →∞
+where
+µ = E (ui) = E (vixi) = E (vi) E (xi)
+= 0
+σ2 = Var(ui) = E
+ u2
+i
+
+−(E (ui))2
+= E
+ u2
+i
+
+= E
+ v2
+i x2
+i
+
+= E
+ v2
+i
+
+E
+ x2
+i
+
+= 1
+3
+It follows that given large n
+1
+√nv · x ⇝N
+
+0, 1
+3
+
+A.3. Modified group probability properties
+As we discussed in Section 3.2, the watermarked distribution produced by our method remains a valid probability distribution.
+The following lemma formally establishes this result.
+Lemma A.2. Let QG1 and QG2 be the group probability in probability vector p, then the modified group probability, as
+defined in Equation 3, 4 satisfies 0 ≤˜QG1, ˜QG2 ≤1 and ˜QG1 + ˜QG2 = 1.
+Proof. Notice that QG1 and QG2 are the summation of the token probabilities in each group, we have
+0 ≤QG1, QG2 ≤1 and QG1 + QG2 = 1.
+12
+
+Protecting Language Generation Models via Invisible Watermarking
+Given z1(x) = cos (fwg(x, v, M)) and z2(x) = cos (fwg(x, v, M) + π), we have
+0 ≤z1(x), z2(x) ≤1 and z1(x) + z2(x) = 0
+Then we can get
+0 ≤QG1 + ε (1 + z1(x)) ≤1 + 2ε
+0 ≤QG2 + ε (1 + z2(x)) ≤1 + 2ε
+Therefore,
+0 ≤QG1 + ε (1 + z1(x))
+1 + 2ε
+≤1
+0 ≤QG2 + ε (1 + z2(x))
+1 + 2ε
+≤1
+QG1 + ε (1 + z1(x))
+1 + 2ε
++ QG2 + ε (1 + z2(x))
+1 + 2ε
+= (QG1 + QG2) + 2ε + ε (z1(x) + z2(x))
+1 + 2ε
+= 1 + 2ε
+1 + 2ε = 1
+13

@@ -1,0 +1,1534 @@
+WatME: Towards Lossless Watermarking Through Lexical Redundancy
+Liang Chen♠Yatao Bian♡Yang Deng♢Deng Cai♡
+Shuaiyi Li♠Peilin Zhao♡Kam-Fai Wong♠
+♠The Chinese University of Hong Kong ♡Tencent AI Lab ♢National University of Singapore
+{lchen, kfwong}@se.cuhk.hk
+Abstract
+Text watermarking has emerged as a pivotal
+technique for identifying machine-generated
+text. However, existing methods often rely on
+arbitrary vocabulary partitioning during decod-
+ing to embed watermarks, which compromises
+the availability of suitable tokens and signifi-
+cantly degrades the quality of responses. This
+study assesses the impact of watermarking on
+different capabilities of large language mod-
+els (LLMs) from a cognitive science lens. Our
+finding highlights a significant disparity; knowl-
+edge recall and logical reasoning are more
+adversely affected than language generation.
+These results suggest a more profound effect
+of watermarking on LLMs than previously un-
+derstood. To address these challenges, we in-
+troduce Watermarking with Mutual Exclusion
+(WatME), a novel approach leveraging linguis-
+tic prior knowledge of inherent lexical redun-
+dancy in LLM vocabularies to seamlessly in-
+tegrate watermarks. Specifically, WatME dy-
+namically optimizes token usage during the
+decoding process by applying a mutually ex-
+clusive rule to the identified lexical redundan-
+cies.
+This strategy effectively prevents the
+unavailability of appropriate tokens and pre-
+serves the expressive power of LLMs.
+We
+provide both theoretical analysis and empirical
+evidence showing that WatME effectively pre-
+serves the diverse capabilities of LLMs while
+ensuring watermark detectability. Our code
+will be released to facilitate future research. via
+https://github.com/ChanLiang/WatME.
+1
+Introduction
+The advent of large language models (Ouyang et al.,
+2022; OpenAI, 2023a) with human-level genera-
+tive capabilities presents tremendous opportunities
+across diverse domains (Deng et al., 2023; Li et al.,
+2024; Wang et al., 2023). However, their ability to
+synthesize high-quality text also raises widespread
+concerns about potential misuse, including the dis-
+semination of misinformation (Zellers et al., 2019;
+Figure 1: An illustration of WatME’s advantage for loss-
+less watermarking. The left panel depicts a vanilla LM
+with all words available during generation. The middle
+panel exposes the flaw in vanilla watermarking, which
+may assign all suitable tokens (e.g., ’ocean’ and ’sea’)
+to the red list, diminishing text quality. The right panel
+underlines how WatME exploits lexical redundancy by
+applying a mutual exclusion rule between such words,
+ensuring at least one suitable word remains on the green
+list, thereby improving text quality.
+Chen et al., 2023a) and the facilitation of academic
+dishonesty (Stokel-Walker, 2022). This neces-
+sitates developing techniques to reliably attribute
+generated text to AI systems.
+Existing approaches typically fall into two main
+paradigms. The first type attempts to distinguish
+machine-generated text by hunting for inductive
+statistical or linguistic patterns (Gehrmann et al.,
+2019; Mitchell et al., 2023; Zellers et al., 2019;
+OpenAI, 2023b), employing methods that span
+from basic manual feature engineering to the in-
+tricate training of complex classifiers. However,
+as generative models continue improving, their
+outputs increasingly resemble the pattern of hu-
+man writing, rendering statistical detectors inef-
+fective (Dou et al., 2022; Sadasivan et al., 2023;
+Chakraborty et al., 2023). The second paradigm
+arXiv:2311.09832v3  [cs.CL]  6 Jun 2024
+
+promotes a more proactive approach, advocating
+for direct intervention in the generative process
+to actively watermark model outputs (Kirchen-
+bauer et al., 2023; Christ et al., 2023; Zhao et al.,
+2023). This strategy embeds identifiable finger-
+prints within machine-generated text, enabling
+provenance verification. As LLMs’ capabilities
+continue to grow, this approach is more effective
+in detecting LLM-generated text (Sadasivan et al.,
+2023). However, introducing watermarks during
+text generation can significantly impact output qual-
+ity, which has been a consistent challenge for model
+developers - how to effectively watermark while
+preserving text quality.
+Recent studies have attempted to improve text
+quality by ensuring unbiased output distributions
+in watermarking (Kuditipudi et al., 2023; Hu et al.,
+2024), while employing pseudorandomness-guided
+perturbations or reweighting to adjust the original
+output distributions of LLMs. However, an unbi-
+ased distribution in expectation does not guarantee
+high text quality, and the use of these techniques
+reduces the effectiveness of watermark detection,
+especially in models that have undergone alignment
+training (Kuditipudi et al., 2023), thereby diminish-
+ing the practical utility of these methods.
+In this paper, we introduce a novel approach to
+text watermarking by leveraging engineered lexi-
+cal redundancy during the decoding phase of lan-
+guage generation. Our method utilizes the com-
+prehensive set of tokens available to a language
+model, clustering them based on overlapping se-
+mantic or syntactic functionalities to create sets
+of interchangeable tokens. This process simulates
+redundancy within the lexical space, akin to the
+surplus pixels in images that facilitate watermark-
+ing in multimodal data (Nikolaidis and Pitas, 1999;
+Samuel and Penzhorn, 2004). The motivation for
+this strategy arises from the challenge of applying
+traditional watermarking techniques to textual data.
+In contrast to the inherent redundancy found in
+images, the discrete and succinct nature of textual
+data offers little to no native redundancy, making
+it challenging to exploit redundancy in the textual
+space (Zhou et al., 2021; He et al., 2022). By en-
+gineering lexical redundancy, our method not only
+surmounts the limitations imposed by the inherent
+properties of natural language but also paves the
+way for secure and efficient text watermarking.
+After exploring these redundancies, we exploit
+them via our novel algorithm, WatME, which en-
+hances text quality by integrating a mutual exclu-
+sivity rule within the context of lexical redundancy
+during the watermarking process.
+Specifically,
+WatME refines the decoding process by explicitly
+assigning words within each redundant cluster to
+distinct ’green’ or ’red’ teams, ensuring that no sin-
+gle cluster is wholly allocated to one team. Our
+approach confers two main advantages: (1) it en-
+ables the ’green’ team to capture a broader array
+of semantics, thereby boosting the model’s expres-
+sive power; and (2) it increases the probability that
+the LLM selects the most appropriate word at each
+decoding step, e.g., in Figure 1, vanilla watermark-
+ing can assign all suitable words to the ’red’ list,
+thus severely impairing performance. In contrast,
+our approach guarantees the presence of at least
+one appropriate word, thus preserving the model’s
+expressiveness. Building on these methodologi-
+cal advances, extensive theoretical and empirical
+evidence supports their effectiveness without com-
+promising detection capabilities. These improve-
+ments significantly bolster the emergent abilities
+of large models under watermarks, surpassing the
+performance of baseline methods.
+Our main contributions are as follows:
+• Motivated by multimedia data’s inherent redun-
+dancy and the precise conciseness of text, we
+propose two distinct approaches for mining lexi-
+cal redundancy.
+• We develop the WatME algorithm, which em-
+beds mutual exclusion rules within the lexical
+space for text watermarking. Theoretical anal-
+ysis is presented to validate its effectiveness in
+preserving the quality of text responses.
+• Experimental results show that WatME effec-
+tively outperforms existing methods in retain-
+ing the emergent capabilities of LLMs, notably
+knowledge recall and logical reasoning, within
+the conceptual framework of Cattell’s cognitive
+theory, without compromising detectability.
+2
+Related Work
+Early works on AI-generated text detection develop
+post-hoc detection methods to analyze machine-
+generated text by treating the problem as a binary
+classification task (OpenAI, 2019; Jawahar et al.,
+2020; Mitchell et al., 2023). For instance, Ope-
+nAI has fine-tuned RoBERTa (Liu et al., 2019) to
+distinguish between human and GPT-2 generated
+
+texts (OpenAI, 2019). However, existing detectors
+are found to be fragile against adversarial attacks
+(Wolff, 2020) and biased towards non-native En-
+glish writers (Liang et al., 2023). Moreover, as
+LLMs continue to advance, their generated outputs
+more closely resemble human-written text, render-
+ing these methods progressively less effective.
+On the other side, watermarking, traditionally
+a copyright marking method (Adi et al., 2018;
+Rouhani et al., 2018), involves developers, users,
+and regulatory entities. Developers choose an al-
+gorithm to subtly embed hidden modifications into
+data, which can be altered during user transmission.
+Regulatory bodies can later extract this information
+to trace and regulate AI-generated content (Atal-
+lah et al., 2001; Wilson et al., 2014; Hacker et al.,
+2023). In the context of natural languages, water-
+marking typically involves modifying content or
+structure. For example, rule-based methods (Stefan
+et al., 2000) or carefully designed neural encoders
+(Yang et al., 2022; Ueoka et al., 2021) encrypt mes-
+sages into text, which are then extracted using the
+corresponding rules and neural decoder. The dis-
+crete nature of natural language, however, presents
+a considerable challenge to this approach, as mod-
+ifications can unintentionally degrade text quality
+or alter its intended meaning.
+For the detection of LLM-generated texts, a pi-
+oneering watermarking technique (Kirchenbauer
+et al., 2023) partitions tokens into ’green’ and ’red’
+lists, biases output distribution towards ’green’ to-
+kens, and creates patterns that are detectable yet im-
+perceptible to humans. Nevertheless, while yield-
+ing promising detection results, these methods may
+still degrade the textual quality and be vulnerable to
+the paraphrase attack. Current efforts (Christ et al.,
+2023; Fernandez et al., 2023; Zhao et al., 2023) in
+this field aim to develop more robust watermarking
+methods capable of defending various user attacks.
+Apart from improving robustness, a few studies
+have recognized the importance of enhancing the
+quality of text produced by watermarked LLMs.
+(Kuditipudi et al., 2023) utilizes Gumbel softmax
+to incorporate pseudorandomness-based random-
+ness into the output distribution of language mod-
+els. While this technique alters the probability
+distribution, the Gumbel softmax ensures that the
+expected distribution remains approximately un-
+changed, thus rendering the watermarking process
+unbiased. Recent work (Hu et al., 2024) also shares
+a similar philosophy of employing reweighting
+technology for unbiased output distribution trans-
+formations, preserving the expected distribution
+unbiased. However, unbiased distribution can not
+guarantee unaffected text quality. Furthermore,
+these methodologies have shown a marked de-
+crease in detection performance, particularly for
+aligned LLMs (Kuditipudi et al., 2023). Address-
+ing these shortcomings, our research introduces a
+novel paradigm that exploits the intrinsic redun-
+dancy in the text generation process of LLMs to
+create more lossless watermarks, with a special
+emphasis on LLMs’ emergent capabilities, thereby
+offering a watermarking solution that is both loss-
+less and consistently detectable.
+3
+Method
+In this section, we begin by providing a summary
+of the preliminaries related to text watermarking.
+Subsequently, we delve into an investigation of re-
+dundancy in the lexical space and demonstrate how
+this redundancy can be leveraged to develop a wa-
+termarking algorithm that achieves a higher degree
+of losslessness for large language models. Finally,
+we employ mathematical analysis to elucidate the
+benefits of our proposed method.
+3.1
+Preliminary
+The watermarking process is composed of two fun-
+damental procedures: watermark encoding and wa-
+termark detection. The encoding procedure is car-
+ried out by developers to insert a watermark into an
+output natural language sequence y, generated by a
+LLM M for a given prompt x. While the detection
+procedure, performed by regulators, involves the
+extraction and identification of the watermark from
+the sequence y for the purpose of monitoring the
+output from model M. The algorithms that detail
+these procedures are described in the Appendix A.
+The watermark encoding process is guided by
+two parameters: γ and δ. At each decoding step t,
+it uses a hash key, which could be the index of the
+previous token, to partition the vocabulary V into
+two subsets: a green list Gt which encourages us-
+age, and a red list Rt which discourages usage. The
+parameter γ determines the size of the green list,
+while δ specifies the degree of encouragement for
+the green list, the increase in current logits ℓt before
+performing softmax, as Eq.1. As δ rises, the water-
+mark becomes more detectable in the subsequent
+detection process, but it may also compromise the
+quality of the generation. In real-world regulatory
+
+scenarios, where high detectability is required, a
+large δ value is generally preferred.
+ˆℓt[i] := ℓt[i] + δ,
+i ∈Gt
+ˆpt = softmax(ˆℓt)
+(1)
+The watermark detection process counts the
+number of green list tokens within y, denoted by
+|y|G, using Eq.2. This process begins with the
+null hypothesis H0: The text sequence is gener-
+ated without adherence to the green list rule. A
+z-statistic is then computed by Eq.3. If the z-score
+surpasses a pre-specified threshold, the null hypoth-
+esis is rejected, and the watermark is identified.
+|y|G =
+Xn
+t=1 1(yt ∈Gt),
+(2)
+zy = (|y|G −γ|V|) /
+p
+|V|γ(1 −γ).
+(3)
+3.2
+Explore the Redundancy in Lexical Space
+Concept of Lexical Redundancy
+Inspired by the
+success of image watermarking, we hypothesize
+that identifying redundancy within data can enable
+watermarking that doesn’t compromise text qual-
+ity. We thus explore the same opportunities within
+textual data, a challenging task given the discrete
+nature of natural language.
+To address this challenge, we introduce a related
+concept in NLP: lexical redundancy. This phe-
+nomenon arises during text generation when the
+most appropriate word is selected from a large, pre-
+constructed vocabulary. Often, this vast vocabulary
+includes numerous words with similar semantic
+and syntactic functions — a feature that makes
+these words interchangeable, thereby resulting in
+the inherent redundancy in the lexical space.
+Our interest in exploring lexical redundancy is
+grounded in the understanding that interchangeable
+synonyms, even when used in varied contexts, can
+deliver similar or identical semantic or syntactic
+functions. This insight assists in preserving the
+quality of text generation through an optimized
+watermark encoding method. For instance, if a suit-
+able word is allocated to the red list, while its syn-
+onym is placed in the green list, then the language
+model can still express the intended semantics or
+accomplish the necessary syntactic functions. This
+understanding forms the primary motivation for
+investigating lexical redundancy.
+Constructing Redundant Lexical Clusters
+To
+this end, we now focus on the construction of lex-
+ical redundancy. This process involves automati-
+cally grouping tokens—each with similar semantic
+or syntactic functions—from the language model’s
+vocabulary into clusters. Each cluster, made up of
+interchangeable tokens, is designed to express a
+specific semantic or syntactic unit.
+To obtain high-quality redundant lexical clusters,
+we propose the following two different methods:
+the dictionary-based method, and the prompting-
+based method:
+• Dictionary-Based Method: Utilize external dic-
+tionaries, such as WordNet (Miller, 1992) and
+Youdao Dictionary, to discover synonyms within
+the vocabulary. These synonyms often can be
+substituted for each other, although there are in-
+evitably some cases where they cannot be in-
+terchanged due to polysemy. This method is
+beneficial for exploiting established synonym re-
+lationships but is limited to complete words due
+to its dependency on external resources.
+• Prompting-based Method: We prompt large
+language models, such as LLaMA2 (Touvron
+et al., 2023), to infer synonyms for a given to-
+ken by utilizing in-context learning techniques
+(Brown et al., 2020a), with the demonstrations be-
+ing annotated manually by us. Detailed prompts
+are deferred to Appendix B.
+To acquire higher-quality clusters with fully in-
+terchangeable tokens, we employed two strategies
+during the mining process:
+Handling Subword Tokenization
+Subword to-
+kenization blends word and character-based ap-
+proaches (Sennrich et al., 2016; Schuster and Naka-
+jima, 2012; Kudo and Richardson, 2018), chal-
+lenges the mining of redundant lexical clusters in
+neural text processing. This technique typically re-
+tains common words as full units and decomposes
+rare words into subunits. Our research mitigates
+these challenges by concentrating on intact, fre-
+quently used words during preprocessing, thereby
+diminishing noise and simplifying the algorithm.
+Incorporating Grammatical Factors
+In the con-
+text of English, the identification of interchange-
+able words demands consideration of grammatical
+factors—tense, voice, and number—alongside se-
+mantic similarity. For instance, ’car’ and ’vehicles’
+differ in number, affecting interchangeability. Our
+method addresses these issues by implementing
+a rule set that screens for grammatical inconsis-
+tencies, ensuring the generation of coherent and
+high-quality lexical clusters for subsequent use.
+
+These strategies yield lexical clusters, with each
+row in Figure 1’s bottom right panel representing a
+cluster of interchangeable tokens. Cluster quality
+is manually evaluated in Section 6.1.
+3.3
+WatME: Exploit the Lexical Redundancy
+Having constructed redundant clusters within the
+lexical space, we now turn to exploit these for a
+lossless watermark algorithm.
+To facilitate the description of our algorithm,
+we provide some definitions: A subset S ⊆V
+is defined within the vocabulary V of a language
+model M. This subset specifically comprises com-
+plete tokens that share synonyms within the vocab-
+ulary. We then denote a collection of redundant
+lexical clusters we mined as C = {Ci | i = 1..n}
+such that Sn
+i=1 Ci = S. Each cluster, Ci, is rep-
+resented as a token collection Ci = {sij | j =
+1..mi, sij ∈S} for i = 1..n, and any pair of to-
+kens sij, sik ∈Ci are interchangeable. We propose
+to implement our understanding of lossless wa-
+termarks by introducing a mutual exclusion rule
+building on the identified lexical clusters: inter-
+changeable tokens are mutually exclusive during
+partitioning. In other words, if a fraction of to-
+kens A, representing a certain semantic or syntac-
+tic function, is assigned to the red list, then their
+remaining synonyms B should be placed on the
+green list, and vice versa.
+We then detail the WatME encoding process,
+outlined in Alg. 1, which employs a two-step par-
+titioning process to form a green and red list. The
+first partition occurs within the redundant lexical
+clusters C that we have identified within S, while
+the second takes place among the remaining part
+in the vocabulary denoted as V \ S. We use γ to
+determine the number of tokens from the mined
+clusters that are allocated to the green list G′
+t in
+the first partition. The remaining tokens, based on
+the principle of mutual exclusivity, are assigned to
+the red team R′
+t. The second partition continues
+to allocate words to the green list Gt from the re-
+maining vocabulary until the combined size of the
+green teams from both steps reaches the predefined
+limit, γ. The rest of the process follows the steps
+outlined in the vanilla watermarking of Alg. 2.
+The WatME detection algorithm is unchanged,
+except the green list calculation now uses Alg. 2.
+3.4
+Theoretical Analysis
+We provide a mathematical analysis demonstrating
+how WatME outperforms the conventional method,
+Algorithm 1 WatME Encoding
+Input: prompt x1 · · · xm, green list size γ ∈(0, 1), water-
+mark strength δ > 0.
+for t = 0, 1, · · · , T −1 do
+1.
+Get the logit ℓt ∈R|V| from M.
+2.
+Use seed from the last token, split each cluster Ci
+in parallel into green list G′
+it (of size |Ci|γ) and
+red list R′
+it (of size (1−γ)|Ci|) . Let G′
+t = ∪iG′
+it
+and R′
+t = ∪iR′
+it.
+3.
+Partition the remaining part V \ S into a green list
+Gt of size γ|V | −|G′
+t| and a red list Rt of size
+(1 −γ)|V | −|R′
+t|.
+4.
+Merge lists from the previous two steps: Gt =
+Gt ∪G′
+t and Rt = Rt ∪R′
+t.
+5.
+Add δ to the elements of logit ℓt corresponding to
+the green list, then softmax.
+ˆpt = softmax(ℓt[i] + δ), i ∈Gt
+6.
+Sample the next token yt+1 from ˆpt.
+end for
+Output: watermarked text y1 · · · yT .
+focusing on the ’green’ team’s expressiveness and
+the probability of high-quality sampling.
+Definition 3.1 (Semantic Entropy) Let V repre-
+sent the vocabulary of a language model. We define
+the semantic entropy of V, denoted by Hsem(V),
+as the entropy of the semantic distribution across
+V. This entropy quantifies the diversity and rich-
+ness of meanings expressible by V. Consequently,
+a higher value of Hsem(V) signifies a vocabulary
+with greater semantic richness.
+Definition 3.2 (Intrinsic Expressiveness) It
+is
+assumed that a language model M, with a vocab-
+ulary V characterized by high semantic entropy
+as indicated by Hsem(V), possesses an enhanced
+intrinsic expressive capacity.
+This capacity is
+unaffected by the output distribution of M and
+is due to the extensive semantic capabilities of V,
+which endow M with the potential for stronger
+expressive abilities.
+Assumption 3.3 We consider practical scenarios
+that require high detectability, and thus a large
+value of δ. In such a strong watermarking scenario,
+tokens from the green list are more probable to be
+used than those from the red list.
+Note:
+Assumption 3.3 establishes the founda-
+tional premise of text watermarking’s effectiveness.
+Building upon the Definitions and Assumption,
+we derive the following theorem.
+Theorem 3.4 Consider that pt ∈R|V| represents
+the predicted distribution of the model M at de-
+coding time t. Let wi denote the token with the ith
+
+highest probability in pt. The higher the rank of
+a token (i.e., the smaller i is), the more suitable it
+is to be selected. Under the conditions of Assump-
+tion 3.3, the WatME watermarking method is more
+likely to select a suitable token compared to the
+vanilla watermarking method.
+Theorem 3.5 Given a fixed proportion γ of the
+green team, the expressive power of a language
+model M employing the WatME exceeds that of
+one utilizing a vanilla watermarking approach.
+These theorems highlight two advantages of
+WatME; their proofs are in the Appendix C.
+4
+Impact on Emergent Abilities
+The majority of research on text watermarking uti-
+lizes the C4 dataset (Dodge et al., 2021) as a basis
+for testing perplexity (PPL). However, watermark-
+ing not only impacts the fluency of text generation
+but also holds the potential to influence LLMs on
+a broader scale, such as emergent abilities. These
+unique abilities intrinsic to LLMs garner significant
+interest from users and stimulate curiosity within
+the research community. However, they are often
+overlooked in the field of text watermarking.
+Although a consensus definition is lacking, emer-
+gent abilities are typically characterized in many
+studies (Brown et al., 2020b; Wei et al., 2022; Yu
+et al., 2023) as a model’s capacity to perform spe-
+cific tasks without training. In light of this, we
+propose to test and compare the performance of
+WatME and Vanilla watermark algorithms on dif-
+ferent tasks using prompting technologies.
+To comprehensively test the impact of water-
+marking on these abilities, we attempt to catego-
+rize it into different scenarios for a more exhaus-
+tive examination. Specifically, we draw upon Cat-
+tell’s cognitive theory (Cattell, 1963), which bifur-
+cates intelligence into crystallized and fluid intel-
+ligence. Crystallized intelligence corresponds to
+the model’s utilization of learned knowledge and
+experience, while fluid intelligence involves logical
+thinking and solving problems. Correspondingly,
+we propose to examine crystallized intelligence
+through an assessment of the model’s knowledge
+capabilities, and fluid intelligence through its abil-
+ity to reason and solve mathematical problems.
+Knowledge Capability.
+To evaluate the model’s
+mastery of world knowledge, we employ Truth-
+fulQA (Lin et al., 2022), a benchmark designed to
+test if LLMs can generate truthful and informative
+answers. We select the generation setting.
+Reasoning Capability.
+We employ the GSM8K
+dataset to assess the model’s chain-of-thought rea-
+soning. Comprising 8K arithmetic and math prob-
+lems, it provides a platform for evaluating rea-
+soning performance. Aligned with the CoT Hub
+prompt (Fu et al., 2023), our evaluations include
+few-shot scenarios that prompt the model to demon-
+strate reasoning and generate thought chains.
+5
+Experiments
+5.1
+Experimental Setups
+Evaluation Metrics
+To evaluate detection perfor-
+mance, following previous work, we use the Area
+Under the Receiver Operating Characteristic curve
+(AUROC), a well-established metric for binary clas-
+sifiers. For mathematical reasoning tasks, we use
+Accuracy to assess the correctness of the model’s
+solutions. In our evaluation of the TruthfulQA
+dataset, following Lin et al. (2022), we use the
+trained GPT-Truth and GPT-Info scorers, assessing
+the model’s capacity to generate both truthful and
+informative responses. Given the potential trade-
+off between these two perspectives, the product of
+Truth and Information (Truth.*Info.) is commonly
+used as an overall measure of performance. On the
+C4 dataset, we report Perplexity (PPL).
+Baselines
+We compared our model with four es-
+tablished baselines. First, KGW-Mark (Vanilla
+watermarking) (Kirchenbauer et al., 2023), which
+categorizes teams into ’red’ and ’green’ to facili-
+tate detection. Second, Gumbel-Mark (Kuditipudi
+et al., 2023), which employs a Gumbel-Softmax
+distribution to introduce stochasticity into the wa-
+termarking process. Third, Unbiased-Mark (Hu
+et al., 2024), which implements reweighting tech-
+niques to maintain the expected output distribution
+of the LLM during watermarking. Lastly, Provable-
+Mark (Zhao et al., 2023), which uses a fixed hash
+key during watermarking to achieve provably better
+performance.
+Models
+We utilized two distinct types of LLMs
+for experimentation:
+the non-aligned Llama2
+model (Touvron et al., 2023), and the aligned Vi-
+cuna v1.5 model (Chiang et al., 2023). The ma-
+jority of the results reported in this paper were
+obtained using the 7B version of the models.
+Further setup details are in Appendix E.
+
+Model
+GSM8K
+TruthfulQA
+C4
+Acc.
+AUROC
+True.
+Info.
+True.*Info.
+AUROC
+PPL
+AUROC
+LLAMA2-7B
+11.22
+-
+95.10
+92.78
+88.23
+-
+4.77
+-
++ KGW-MARK
+5.61−50.0%
+0.8886
+57.16−39.9%
+84.33−9.1%
+48.20−45.4%
+0.8416
+7.00
+0.9724
++ GUMBEL-MARK
+7.28−35.1%
+0.9121
+45.90−51.7%
+92.78−0.0%
+42.59−51.7%
+0.4931
+39.93
+0.9422
++ UNBIASED-MARK
+10.24−8.7%
+0.5478
+44.06−53.7%
+93.76+1.1%
+41.43−53.0%
+0.5051
+15.62
+0.5451
++ PROVABLE-MARK
+5.16−54.01%
+0.9052
+64.14−32.6%
+91.68−1.2%
+58.80−33.4%
+0.9555
+10.21
+0.9623
++ WATMEdictionary
+9.17−18.3%
+0.8995
+69.28−27.2%
+88.25−4.9%
+61.14−30.7%
+0.8848
+5.32
+0.9804
++ WATMEprompting
+5.84−48.0%
+0.9128
+55.83−41.3%
+95.10+2.5%
+50.39−42.9%
+0.8659
+6.89
+0.9724
+VICUNA-V1.5-7B
+17.51
+-
+93.88
+87.27
+81.92
+-
+10.77
+-
++ KGW-MARK
+13.87−20.8%
+0.7870
+74.05−21.1%
+87.52+0.3%
+64.81−20.1%
+0.7417
+11.62
+0.9679
++ GUMBEL-MARK
+9.02−48.5%
+0.7077
+68.30−27.2%
+87.27−0.0%
+59.61−27.2%
+0.4647
+48.93
+0.8617
++ UNBIASED-MARK
+17.89+2.2%
+0.5508
+70.38−25.0%
+88.86+1.8%
+62.54−23.7%
+0.4855
+19.93
+0.5000
++ PROVABLE-MARK
+12.21−30.27%
+0.8020
+74.42−20.7%
+96.70+10.8%
+71.96−12.2%
+0.8796
+10.21
+0.9582
++ WATMEdictionary
+14.78−15.6%
+0.8044
+78.95−15.9%
+97.43+11.6%
+76.92−6.1%
+0.7897
+10.96
+0.9582
++ WATMEprompting
+16.22−7.4%
+0.7843
+69.65−25.8%
+97.45−11.5%
+67.87−17.2%
+0.7396
+11.54
+0.9519
+Table 1: Performance comparison of Llama2-7B and Vicuna-v1.5-7B under different watermarking algorithms.
+5.2
+Main Results
+Greater Impact on Emergent Abilities than Flu-
+ency
+The experimental evidence suggests that
+watermarking notably hinders the emergent abili-
+ties of LLMs much more than fluency (see Table 1).
+Specifically, the non-aligned Llama2 model experi-
+enced a decline in performance exceeding 50% on
+both the GSM8K and TruthfulQA benchmarks. In
+contrast, the aligned model, Vicuna, demonstrated
+relative resilience but still incurred performance
+reductions greater than 20% on these benchmarks.
+This demonstrates the adverse impact of Vanilla
+Watermarking on the knowledge and reasoning
+capabilities of LLMs, with reasoning showing a
+marginally greater susceptibility.
+Superiority of WatME over baselines in Preserv-
+ing Emergent Abilities
+Across all models and
+benchmarks, the WatME consistently outperformed
+baseline watermarking methods. For the Llama2
+model, WatME mitigated performance degradation
+by 16.8% on GSM8K and by 14.7% on TruthfulQA
+compared to the strongest baseline. Similarly, for
+the Vicuna model, the reductions were 13.4% and
+14.0%, respectively. These outcomes underscore
+WatME’s significant effectiveness in preserving the
+emergent capabilities of LLMs without compromis-
+ing performance as significantly as other methods.
+Comparable Detection Performance of WatME
+Despite the trade-off between text quality and
+detection performance, WatME’s detection effi-
+cacy matched that of the Vanilla Watermark while
+also enhancing model capabilities, as evidenced
+by similar AUROC scores—suggesting our algo-
+rithm attained a better equilibrium than the baseline.
+In contrast, the Gumbel-Mark method noticeably
+compromised detection performance, particularly
+in aligned models and when generating short re-
+sponses (TruthfulQA). Additionally, more perfor-
+mance results under different watermark strengths
+are presented in Discussion 6.3.
+Distinct Advantages of WatME Variations
+It
+is evident that different WatME variations exhibit
+unique strengths; The ’dictionary’ variant outper-
+formed in the Accuracy and Truthfulness scores,
+while the ’prompting’ variant excelled in the Infor-
+mativeness. The integration of these variants may
+offer a fruitful avenue for future research. For a
+comprehensive understanding, a manual analysis
+of lexical clusters derived from these methods is
+presented in the Discussion 6.1.
+Alignment Diminishes Watermark Effectiveness
+Surprisingly, aligned models showed significantly
+greater resistance to watermarking effects than non-
+aligned models. Specifically, Vicuna 1.5’s perfor-
+mance dipped 30% less than Llama2’s across all
+benchmarks, coupled with a 10% lower watermark
+detection performance. To understand the underly-
+ing reasons for these differences, we analyzed the
+output distribution discrepancies between aligned
+and unaligned models in the Discussion 6.4.
+6
+Discussion
+6.1
+Analysis of Clustering Methods
+To analyse redundant clusters from diverse meth-
+ods, we set evaluation criteria to ensure analytical
+
+Figure 2: (a) Human evaluation for the quality of clus-
+ters mined by varied methods and (b) testing detection
+robustness against substitution attacks.
+rigour. These criteria spanned semantic consis-
+tency, contextual appropriateness, and grammati-
+cal consistency, which are essential aspects of clus-
+ter quality. Two annotators used a rating scale of
+0, 1, 2 to annotate the clusters. A score of ’2’
+indicated high or ideal consistency, ’1’ denoted
+moderate or usable consistency, and ’0’ identified
+low or unusable consistency within a cluster. The
+kappa value for the annotations is 0.657. Figure
+2(a) shows both methods met usability, but fell
+short of ideal effectiveness. The dictionary ap-
+proach was superior in semantic coherence due
+to its utilization of lexical databases. Conversely,
+the prompting method outperformed in contextual
+and grammatical consistency, reflecting the varied
+linguistic corpus training of LLMs. This suggests
+the potential benefits of a combined approach, a
+topic reserved for future research.
+6.2
+Robustness Against Attacks
+In addition to affecting the performance of LLMs,
+watermarks are also vulnerable to attacks aimed
+at their removal. To evaluate the robustness of
+our method, we conducted tests against two preva-
+lent types of attacks: substitution attacks and para-
+phrase attacks.
+For the substitution attack, we
+evaluated 200 examples from GSM8k, with var-
+ious token replacement ratios. As shown in Figure
+2(b), WatME consistently outperformed the base-
+line method in the robustness of detection across
+different levels of token replacement. For para-
+phrase attacks, we use a powerful paraphraser,
+llama-2-chat-13B, to extensively rewrite the wa-
+termarked text generated by llama-2-7b. We pro-
+vided it with the prompt: "Please paraphrase the
+following text, altering the wording significantly
+yet preserving the original meaning and length."
+We then subjected our system to these rewritten
+samples using 200 entries from both GSM8k and
+TruthfulQA. The results are presented in Tables 2.
+Method
+Dataset
+Original Para. Attack
+KGW-Mark
+GSM8k
+0.885
+0.745
+WatME
+0.955
+0.910
+KGW-Mark TruthfulQA
+0.924
+0.528
+WatME
+0.949
+0.673
+Table 2: Detection robustness against paraphrasing at-
+tacks.
+We offer two perspectives to understand the ro-
+bustness of WatME: (1) Intuitively, for substitution
+attacks, the effect on watermarking depends on
+whether it triggers a token swap between the ’red’
+and ’green’ teams: a swap affects the detection,
+while no swap means the watermark remains in-
+tact. With KGW-Mark, semantically similar tokens
+may be allocated to one team, resulting in a sub-
+stitution invariably causing a swap. In contrast,
+WatME is intentionally designed to prevent this
+scenario. Therefore, the likelihood of a red-green
+swap—and consequently the impact on the water-
+mark—is reduced in WatME compared to KGW.
+(2) From an encryption viewpoint, whereas KGW-
+Mark relies on a single division between teams,
+WatME employs multiple divisions—the number
+of clusters plus one (|C|+1), as outlined in Algo-
+rithm 2. Though these multiple partitions are com-
+putationally equivalent to a single partition due to
+efficient parallel matrix operations (explained in
+Appendix D), they introduce a higher level of com-
+plexity and robustness to the encryption process.
+6.3
+Performance Trade-offs at different Delta
+The efficacy of the Watermark is influenced by
+the hyperparameter, Delta, which controls the wa-
+termark strength. An increase in Delta facilitates
+easier watermark detection but at the cost of sev-
+erer impact on the LLMs. We analyse the Truth-
+fulQA and GSM8K datasets.
+Figure 3 shows
+WatME consistently achieved a more favourable
+balance between watermark robustness and LLM
+performance across various Delta settings, surpass-
+ing Vanilla Watermark. Notably, the performance
+curves of WatME are strictly better than that of
+Vanilla, indicating that at equivalent watermark
+strengths, WatME always maintains superior per-
+formance compared to Vanilla Watermark.
+6.4
+Aligned vs Unaligned Models
+Our examination of the response sensitivity to wa-
+termarking in aligned and unaligned models in-
+
+Figure 3: Performance trade-offs comparison between
+WatME and Vanilla Watermark on TruthfulQA and
+GSM8K at different Delta (∆) values.
+Figure 4: Token-level entropy distributions for aligned
+(green) and unaligned (blue) models on GSM8K and
+TruthfulQA benchmarks.
+volved analyzing their output distributions on the
+TruthfulQA and GSM8K datasets. We computed
+the average entropy for tokens in the generated
+answers and found that aligned models exhibit
+markedly lower entropy, suggesting more deter-
+ministic response patterns, as illustrated in Figure
+4. This pronounced certainty in aligned models’
+outputs presents a challenge for watermarking be-
+cause of the limited variability that is essential for
+effective watermark encoding.
+7
+Conclusion
+This study explores the impact of watermarking
+on the emergent abilities of LLMs—an aspect of-
+ten neglected in the field. Our findings highlight
+the considerable adverse effects of traditional wa-
+termarking methods on LLMs’ emergent abilities,
+including knowledge recall and logical reasoning.
+In response, we introduced WatME—a novel
+watermarking approach that leverages lexical re-
+dundancy. Theoretical analysis and comprehen-
+sive empirical results indicate WatME consistently
+preserves the expressive power of LLMs without
+compromising detection performance, enabling de-
+velopers to encode watermarks with less disruption
+to user experience.
+The advancements with WatME mark a stride
+in lossless watermarking, enabling developers to
+encode watermarks with less disruption to user ex-
+perience. We hope to promote a better equilibrium
+between regulatory compliance and user satisfac-
+tion in LLM development.
+Limitations
+In this section, we discuss the limitations of this
+work from two perspectives.
+Firstly, although WatME represents a step to-
+ward lossless watermarking, it is not entirely loss-
+free. The introduction of a controlled bias, inherent
+to watermarking methods, subtly alters the gen-
+erated data. This compromise is a critical conse-
+quence as it diverges from the ideal of a completely
+lossless system. This deviation poses a dilemma for
+developers weighing the benefits of watermarking
+against potential user experience and regulatory
+trade-offs. Future work aims to bridge this gap,
+enhancing the WatME method to maintain output
+integrity and broaden its appeal for practical imple-
+mentation.
+Secondly, while our method is designed to be
+language-agnostic, the empirical validation pre-
+sented in this work is limited to models process-
+ing the English language. We acknowledge that
+the applicability of watermarking across various
+linguistic contexts is critically important. Future
+investigations will endeavour to broaden the scope
+to include more languages, ensuring the general-
+izability and effectiveness of our approach in a
+multilingual context.
+Thirdly, the challenge of watermarking in low-
+entropy scenarios remains an open problem. Our
+dataset encompasses a range of scenarios, includ-
+ing low-entropy situations where outcomes are
+more predictable and our methodology remains
+effective. However, embedding watermarks in text
+with universally recognized, low-entropy answers
+poses significant challenges, highlighting the need
+for further investigation into constructing and test-
+ing methodologies for low-entropy corpora.
+Lastly, our LLMs-based cluster generation ap-
+proach is influenced by the robustness of the
+prompting methods. Different prompt construc-
+tions can lead to varying outcomes (Zhao et al.,
+2021; Chen et al., 2023b, 2024), represents a lim-
+itation that warrants further discussion and explo-
+ration in future work.
+Despite these limitations, we believe our work
+serves as a significant catalyst for the field, con-
+
+tributing positively to the advancement of more
+lossless and detectable text watermarking tech-
+niques.
+References
+Yossi Adi, Carsten Baum, Moustapha Cisse, Benny
+Pinkas, and Joseph Keshet. 2018. Turning your weak-
+ness into a strength: Watermarking deep neural net-
+works by backdooring.
+Mikhail J Atallah, Victor Raskin, Michael Crogan,
+Christian Hempelmann, Florian Kerschbaum, Dina
+Mohamed, and Sanket Naik. 2001.
+Natural lan-
+guage watermarking: Design, analysis, and a proof-
+of-concept implementation. In Information Hiding:
+4th International Workshop, IH 2001 Pittsburgh, PA,
+USA, April 25–27, 2001 Proceedings 4, pages 185–
+200. Springer.
+Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+Gretchen Krueger, Tom Henighan, Rewon Child,
+Aditya Ramesh, Daniel M. Ziegler, Jeffrey Wu,
+Clemens Winter, Christopher Hesse, Mark Chen, Eric
+Sigler, Mateusz Litwin, Scott Gray, Benjamin Chess,
+Jack Clark, Christopher Berner, Sam McCandlish,
+Alec Radford, Ilya Sutskever, and Dario Amodei.
+2020a. Language models are few-shot learners.
+Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+Gretchen Krueger, Tom Henighan, Rewon Child,
+Aditya Ramesh, Daniel M. Ziegler, Jeffrey Wu,
+Clemens Winter, Christopher Hesse, Mark Chen,
+Eric Sigler, Mateusz Litwin, Scott Gray, Benjamin
+Chess, Jack Clark, Christopher Berner, Sam Mc-
+Candlish, Alec Radford, Ilya Sutskever, and Dario
+Amodei. 2020b. Language models are few-shot learn-
+ers. CoRR, abs/2005.14165.
+Raymond B. Cattell. 1963.
+Theory of fluid and
+crystallized intelligence:
+A critical experiment.
+Journal of Educational Psychology, 54(1):1–22.
+ShortDOI: 10/fs6ptd KerkoCite.ItemAlsoKnownAs:
+10.1037/h0046743
+10/fs6ptd
+1963-07991-001
+2339240:TGQK3VJY 2405685:C8ZBFK3U.
+Souradip Chakraborty, Amrit Singh Bedi, Sicheng Zhu,
+Bang An, Dinesh Manocha, and Furong Huang. 2023.
+On the possibilities of ai-generated text detection.
+Liang Chen, Yatao Bian, Li Shen, and Kam-Fai Wong.
+2024. Simple permutations can fool LLaMA: Permu-
+tation attack and defense for large language models.
+In ICLR 2024 Workshop on Secure and Trustworthy
+Large Language Models.
+Liang Chen, Yang Deng, Yatao Bian, Zeyu Qin, Bingzhe
+Wu, Tat-Seng Chua, and Kam-Fai Wong. 2023a. Be-
+yond factuality: A comprehensive evaluation of large
+language models as knowledge generators. In Pro-
+ceedings of the 2023 Conference on Empirical Meth-
+ods in Natural Language Processing, pages 6325–
+6341, Singapore. Association for Computational Lin-
+guistics.
+Liang Chen, Hongru Wang, Yang Deng, Wai Chung
+Kwan, Zezhong Wang, and Kam-Fai Wong. 2023b.
+Towards robust personalized dialogue generation via
+order-insensitive representation regularization. In
+Findings of the Association for Computational Lin-
+guistics: ACL 2023, pages 7337–7345, Toronto,
+Canada. Association for Computational Linguistics.
+Wei-Lin Chiang, Zhuohan Li, Zi Lin, Ying Sheng,
+Zhanghao Wu, Hao Zhang, Lianmin Zheng, Siyuan
+Zhuang, Yonghao Zhuang, Joseph E. Gonzalez, Ion
+Stoica, and Eric P. Xing. 2023. Vicuna: An open-
+source chatbot impressing gpt-4 with 90%* chatgpt
+quality.
+Miranda Christ, Sam Gunn, and Or Zamir. 2023. Un-
+detectable watermarks for language models. arXiv
+preprint arXiv:2306.09194.
+Yang Deng, Lizi Liao, Liang Chen, Hongru Wang,
+Wenqiang Lei, and Tat-Seng Chua. 2023. Prompt-
+ing and evaluating large language models for proac-
+tive dialogues: Clarification, target-guided, and non-
+collaboration. In Findings of the Association for
+Computational Linguistics: EMNLP 2023, pages
+10602–10621, Singapore. Association for Compu-
+tational Linguistics.
+Jesse Dodge, Maarten Sap, Ana Marasovi´c, William
+Agnew, Gabriel Ilharco, Dirk Groeneveld, Margaret
+Mitchell, and Matt Gardner. 2021. Documenting
+large webtext corpora: A case study on the colossal
+clean crawled corpus.
+Yao Dou, Maxwell Forbes, Rik Koncel-Kedziorski,
+Noah A. Smith, and Yejin Choi. 2022. Is gpt-3 text
+indistinguishable from human text? scarecrow: A
+framework for scrutinizing machine text.
+Pierre Fernandez, Antoine Chaffin, Karim Tit, Vivien
+Chappelier, and Teddy Furon. 2023. Three bricks to
+consolidate watermarks for large language models.
+Yao Fu, Litu Ou, Mingyu Chen, Yuhao Wan, Hao Peng,
+and Tushar Khot. 2023. Chain-of-thought hub: A
+continuous effort to measure large language models’
+reasoning performance. CoRR, abs/2305.17306.
+Sebastian Gehrmann, Hendrik Strobelt, and Alexan-
+der M. Rush. 2019. Gltr: Statistical detection and
+visualization of generated text. In Annual Meeting of
+the Association for Computational Linguistics.
+Philipp Hacker, Andreas Engel, and Marco Mauer. 2023.
+Regulating chatgpt and other large generative AI
+models. In Proceedings of the 2023 ACM Confer-
+ence on Fairness, Accountability, and Transparency,
+
+FAccT 2023, Chicago, IL, USA, June 12-15, 2023,
+pages 1112–1123. ACM.
+Xuanli He, Qiongkai Xu, Lingjuan Lyu, Fangzhao Wu,
+and Chenguang Wang. 2022. Protecting intellectual
+property of language generation apis with lexical
+watermark. Proceedings of the AAAI Conference on
+Artificial Intelligence, 36(10):10758–10766.
+Zhengmian Hu, Lichang Chen, Xidong Wu, Yihan Wu,
+Hongyang Zhang, and Heng Huang. 2024. Unbiased
+watermark for large language models. In The Twelfth
+International Conference on Learning Representa-
+tions.
+Ganesh Jawahar, Muhammad Abdul-Mageed, and Laks
+V. S. Lakshmanan. 2020. Automatic detection of
+machine generated text: A critical survey. In Interna-
+tional Conference on Computational Linguistics.
+John Kirchenbauer,
+Jonas Geiping,
+Yuxin Wen,
+Jonathan Katz, Ian Miers, and Tom Goldstein. 2023.
+A watermark for large language models. Interna-
+tional Conference on Machine Learning.
+Rohith
+Kuditipudi,
+John
+Thickstun,
+Tatsunori
+Hashimoto, and Percy Liang. 2023.
+Robust
+distortion-free watermarks for language models.
+Taku Kudo and John Richardson. 2018. Sentencepiece:
+A simple and language independent subword tok-
+enizer and detokenizer for neural text processing.
+Shuaiyi Li, Yang Deng, Deng Cai, Hongyuan Lu, Liang
+Chen, and Wai Lam. 2024. Consecutive model edit-
+ing with batch alongside hook layers.
+Weixin Liang, Mert Yuksekgonul, Yining Mao, Eric
+Wu, and James Y. Zou. 2023.
+Gpt detectors are
+biased against non-native english writers.
+ArXiv,
+abs/2304.02819.
+Stephanie Lin, Jacob Hilton, and Owain Evans. 2022.
+Truthfulqa: Measuring how models mimic human
+falsehoods.
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+dar Joshi, Danqi Chen, Omer Levy, Mike Lewis,
+Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+Roberta: A robustly optimized bert pretraining ap-
+proach. arXiv preprint arXiv:1907.11692.
+George A. Miller. 1992. WordNet: A lexical database
+for English. In Speech and Natural Language: Pro-
+ceedings of a Workshop Held at Harriman, New York,
+February 23-26, 1992.
+Eric Mitchell, Yoonho Lee, Alexander Khazatsky,
+Christopher D. Manning, and Chelsea Finn. 2023.
+Detectgpt: Zero-shot machine-generated text de-
+tection
+using
+probability
+curvature.
+ArXiv,
+abs/2301.11305.
+N. Nikolaidis and I. Pitas. 1999. Digital image water-
+marking: an overview. In Proceedings IEEE Inter-
+national Conference on Multimedia Computing and
+Systems, volume 1, pages 1–6 vol.1.
+OpenAI. 2019. Gpt-2: 1.5b release.
+OpenAI. 2023a.
+Gpt-4 technical report.
+ArXiv,
+abs/2303.08774.
+OpenAI. 2023b. New ai classifier for indicating ai-
+written text. OpenAI blog.
+Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida,
+Carroll L. Wainwright, Pamela Mishkin, Chong
+Zhang, Sandhini Agarwal, Katarina Slama, Alex
+Ray, John Schulman, Jacob Hilton, Fraser Kelton,
+Luke E. Miller, Maddie Simens, Amanda Askell, Pe-
+ter Welinder, Paul Francis Christiano, Jan Leike, and
+Ryan J. Lowe. 2022. Training language models to
+follow instructions with human feedback.
+ArXiv,
+abs/2203.02155.
+Bita Darvish Rouhani, Huili Chen, and Farinaz
+Koushanfar. 2018. Deepsigns: A generic watermark-
+ing framework for ip protection of deep learning mod-
+els.
+Vinu Sankar Sadasivan, Aounon Kumar, S. Balasub-
+ramanian, Wenxiao Wang, and Soheil Feizi. 2023.
+Can ai-generated text be reliably detected? ArXiv,
+abs/2303.11156.
+S. Samuel and W.T. Penzhorn. 2004. Digital water-
+marking for copyright protection.
+In 2004 IEEE
+Africon. 7th Africon Conference in Africa (IEEE Cat.
+No.04CH37590), volume 2, pages 953–957 Vol.2.
+Mike Schuster and Kaisuke Nakajima. 2012. Japanese
+and korean voice search. 2012 IEEE International
+Conference on Acoustics, Speech and Signal Process-
+ing (ICASSP), pages 5149–5152.
+Rico Sennrich, Barry Haddow, and Alexandra Birch.
+2016. Neural machine translation of rare words with
+subword units.
+Katzenbeisser Stefan, AP Fabien, et al. 2000. Informa-
+tion hiding techniques for steganography and digital
+watermarking.
+Chris Stokel-Walker. 2022. Ai bot chatgpt writes smart
+essays - should professors worry? Nature.
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+Bhosale, Dan Bikel, Lukas Blecher, Cristian Canton
+Ferrer, Moya Chen, Guillem Cucurull, David Esiobu,
+Jude Fernandes, Jeremy Fu, Wenyin Fu, Brian Fuller,
+Cynthia Gao, Vedanuj Goswami, Naman Goyal, An-
+thony Hartshorn, Saghar Hosseini, Rui Hou, Hakan
+Inan, Marcin Kardas, Viktor Kerkez, Madian Khabsa,
+Isabel Kloumann, Artem Korenev, Punit Singh Koura,
+Marie-Anne Lachaux, Thibaut Lavril, Jenya Lee, Di-
+ana Liskovich, Yinghai Lu, Yuning Mao, Xavier Mar-
+tinet, Todor Mihaylov, Pushkar Mishra, Igor Moly-
+bog, Yixin Nie, Andrew Poulton, Jeremy Reizen-
+stein, Rashi Rungta, Kalyan Saladi, Alan Schelten,
+
+Ruan Silva, Eric Michael Smith, Ranjan Subrama-
+nian, Xiaoqing Ellen Tan, Binh Tang, Ross Tay-
+lor, Adina Williams, Jian Xiang Kuan, Puxin Xu,
+Zheng Yan, Iliyan Zarov, Yuchen Zhang, Angela Fan,
+Melanie Kambadur, Sharan Narang, Aurelien Ro-
+driguez, Robert Stojnic, Sergey Edunov, and Thomas
+Scialom. 2023. Llama 2: Open foundation and fine-
+tuned chat models.
+Honai Ueoka, Yugo Murawaki, and Sadao Kuro-
+hashi. 2021. Frustratingly easy edit-based linguistic
+steganography with a masked language model. In
+Proceedings of the 2021 Conference of the North
+American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies,
+pages 5486–5492, Online. Association for Computa-
+tional Linguistics.
+Hongru Wang, Lingzhi Wang, Yiming Du, Liang Chen,
+Jingyan Zhou, Yufei Wang, and Kam-Fai Wong. 2023.
+A survey of the evolution of language model-based
+dialogue systems.
+Jason Wei, Yi Tay, Rishi Bommasani, Colin Raffel,
+Barret Zoph, Sebastian Borgeaud, Dani Yogatama,
+Maarten Bosma, Denny Zhou, Donald Metzler, et al.
+2022. Emergent abilities of large language models.
+arXiv preprint arXiv:2206.07682.
+Alex Wilson, Phil Blunsom, and Andrew D Ker. 2014.
+Linguistic steganography on twitter: hierarchical lan-
+guage modeling with manual interaction. In Media
+Watermarking, Security, and Forensics 2014, volume
+9028, pages 9–25.
+Max Wolff. 2020.
+Attacking neural text detectors.
+ArXiv, abs/2002.11768.
+Xi Yang, Jie Zhang, Kejiang Chen, Weiming Zhang, Ze-
+hua Ma, Feng Wang, and Nenghai Yu. 2022. Tracing
+text provenance via context-aware lexical substitu-
+tion. In Proceedings of the AAAI Conference on Arti-
+ficial Intelligence, volume 36, pages 11613–11621.
+Wenhao Yu, Dan Iter, Shuohang Wang, Yichong Xu,
+Mingxuan Ju, Soumya Sanyal, Chenguang Zhu,
+Michael Zeng, and Meng Jiang. 2023.
+Generate
+rather than retrieve: Large language models are
+strong context generators.
+Rowan Zellers, Ari Holtzman, Hannah Rashkin,
+Yonatan Bisk, Ali Farhadi, Franziska Roesner, and
+Yejin Choi. 2019. Defending against neural fake
+news. Advances in neural information processing
+systems, 32.
+Xuandong Zhao, Prabhanjan Ananth, Lei Li, and Yu-
+Xiang Wang. 2023. Provable robust watermarking
+for ai-generated text.
+Zihao Zhao, Eric Wallace, Shi Feng, Dan Klein, and
+Sameer Singh. 2021. Calibrate before use: Improv-
+ing few-shot performance of language models. In
+Proceedings of the 38th International Conference
+on Machine Learning, volume 139 of Proceedings
+of Machine Learning Research, pages 12697–12706.
+PMLR.
+Yi Zhou, Xiaoqing Zheng, Cho-Jui Hsieh, Kai-Wei
+Chang, and Xuanjing Huang. 2021. Defense against
+synonym substitution-based adversarial attacks via
+Dirichlet neighborhood ensemble. In Proceedings
+of the 59th Annual Meeting of the Association for
+Computational Linguistics and the 11th International
+Joint Conference on Natural Language Processing
+(Volume 1: Long Papers), pages 5482–5492, Online.
+Association for Computational Linguistics.
+Appendix
+A
+Algorithms of Watermark
+This section presents detailed algorithms for the
+watermark encoding and detection processes as
+outlined in (Kirchenbauer et al., 2023). Algorithm
+2 delineates the procedure for encoding a water-
+mark into the output sequence generated by a lan-
+guage model. Conversely, Algorithm 3 explicates
+the method for detecting and confirming the water-
+mark’s presence within generated sequences.
+Algorithm 2 Vanilla Watermark Encoding
+Input: prompt x1 · · · xm,
+green list size γ ∈(0, 1),
+watermark strength δ > 0.
+for t = 0, 1, · · · , T −1 do
+1.
+Get the logit ℓt ∈R|V| from M.
+2.
+Use the hash of the previous token as the
+random seed to partition the vocabulary
+of M into a “green list” Gt of size γ|V|,
+and a “red list” Rt of size (1 −γ)|V|.
+3.
+Add δ to each green list logit and then
+apply softmax to the modified logits.
+ˆℓt[i] := ℓt[i] + δ, i ∈Gt
+ˆpt = softmax(ˆℓt)
+4.
+Sample a next token yt+1 from ˆpt.
+end for
+Output: watermarked text y1 · · · yT .
+B
+Prompt for Cluster Mining
+To facilitate the generation of synonym clusters,
+we employed Llama2-13B-chat. The approach in-
+volved crafting a prompt (Figure 5) that combines
+a clear task description with a set of demonstra-
+tions designed to illustrate the desired task. By
+presenting the model with a few-shot example, we
+primed Llama2-13B-chat to understand and per-
+form the specific task of synonym generation. The
+few-shot prompt was crucial for the model to rec-
+ognize the pattern and replicate it for new target
+
+Algorithm 3 Vanilla Watermark Detection
+Input: text y, detection threshold τ.
+1. Use the previous token to find the “green list”
+Gt at the step t as in Alg. 2.
+2. Calculate the number of green tokens in y as
+|y|G = Pn
+t=1 1(yt ∈G).
+3. Compute the z-statistic:
+zy = (|y|G −γ|V|) /
+p
+|V|γ(1 −γ).
+4. if zy > τ then return 1 (watermarked).
+5. else return 0 (unwatermarked).
+Output: 0 or 1
+words, thus enabling the mining of synonym clus-
+ters effectively.
+C
+Proofs of Theorems
+In this section, we present the detailed proofs of
+the theorems introduced before. Each theorem is
+treated in its respective subsection.
+C.1
+Proof of Theorem 3.4
+Proof We begin the proof by considering i = 1, 2.
+Case I: where w1 is in the green list (Gt):
+If w1 ∈Gt, then both watermarking methods are
+lossless because they can select the most suitable
+token w1.
+Case II: where w1 is in the red list (Rt):
+We consider w2, which may or may not be a
+synonym of w1:
+Sub-case i: w2 is not a synonym of w1.
+If w1 /∈Gt and̸∃Ci ∈C s.t. w1, w2 ∈Ci, then
+according to Algo. 1 we have:
+PWatME(w2 ∈Gt) = Pwatermark(w2 ∈Gt).
+In this case, the two methods are the same.
+Sub-case ii: w2 is a synonym of w1.
+If w1 /∈Gt and ∃Ci ∈C s.t. w1, w2 ∈Ci, then
+according to Algo. 1 we have:
+PWatME(w2 ∈Gt) > Pwatermark(w2 ∈Gt).
+Based on Assumption 3.3, WatME is more likely
+to select the suitable token. Combining these cases,
+the theorem is proven. It should be noted that while
+this proof explicitly considers the cases for i = 1, 2,
+the logic extends to any arbitrary value of i.
+C.2
+Proof of Theorem 3.5
+Proof Let us define the vocabulary V with syn-
+onym clusters S = {C1, . . . , Cn}, where ¯C rep-
+resents the set of non-synonymous, unique words.
+According to Algs 2 and 1, WatME maintains a con-
+stant number of distinct semantic representations,
+quantified as n + γ · | ¯C|. In contrast, the semantic
+token count of standard watermarking algorithms
+is lower than this figure. According to Definition
+3.1 the disparity in semantic entropy between the
+two methodologies is thus evident. Given Defini-
+tion 3.2, the increased semantic entropy inherent to
+WatME confirms the theorem.
+D
+Time Complexity Analysis
+The conventional algorithm necessitates a partition
+of the vocabulary per decoding operation, which re-
+sults in a time complexity of O(|V |). Our method
+incorporates two partitioning stages: initially tar-
+geting the redundant cluster, followed by the re-
+maining vocabulary. During the first stage, we pad
+the cluster into a 2D matrix and conduct parallel
+sampling. The subsequent stage aligns with the pro-
+cedures of the Vanilla algorithm. Consequently, the
+time complexity of our method remains at O(|V |).
+E
+Setup Details
+In our experiments, we used prompts from the CoT
+hub (Fu et al., 2023) for the GSM8K dataset and
+the original prompts from TruthfulQA (Lin et al.,
+2022). The Llama2 model was evaluated using
+its original prompt format to maintain consistency.
+Greedy decoding was employed as the strategy for
+all tasks, with maximum decoding lengths set at
+128 tokens for GSM8K and 50 tokens for Truth-
+fulQA, which allowed for the complete generation
+of answers within the datasets.
+To account for the differing answer lengths in the
+GSM8K and TruthfulQA datasets, we fine-tuned
+the watermark hyperparameters. For GSM8K, with
+its longer answers aiding detection, we used a
+milder watermark intensity, setting gamma at 0.3
+and delta at 3.0. Conversely, the brevity of answers
+in TruthfulQA complicates detection, necessitating
+a stronger watermark intensity—again with gamma
+at 0.3, but with delta increased to 4.0 to achieve sat-
+isfactory detection performance (AUROC > 0.7).
+Evaluation metrics were carefully chosen: AU-
+ROC was calculated using the ‘sklearn‘ library, and
+for the assessment of GPT-Truth and GPT-Info, we
+utilized a fine-tuned Llama2-13B-chat model that
+demonstrated an accuracy above 93% on the valida-
+tion set. All model implementations were executed
+using the ‘transformers‘ library.
+The hardware employed for these experiments
+
+Figure 5: Few-Shot Demonstration of Synonym Generation using LLMs.
+consisted of a 40GB A100 GPU and a 32GB V100
+GPU, ensuring sufficient computational power for
+model training and evaluation.
+F
+Examples of Redundant Clusters
+We present some examples of mined clusters at 3.
+G
+Multilingual Performance Testing
+We expand our evaluation to include the Chi-
+nese Long Text Summarization Dataset (CLTS)
+and a bilingual Large Language Model (LLM),
+ChatGLM3-6b. This model employs Byte Pair En-
+coding (BPE) tokenization with a vocabulary size
+of 65k—double that of the Llama 2 model which
+has a 32k vocabulary size. Synonym mining, a
+critical step in our process, was conducted using
+the ChatGLM3-13B model. The performance of
+different watermarking methods was evaluated us-
+ing the ROUGE-L and AUROC metrics, as shown
+in Table 4. The results highlight that watermark-
+ing with WatME considerably enhances detection
+robustness compared to the baseline method, main-
+taining effectiveness despite varying levels of to-
+ken replacement. This improvement underscores
+WatME’s capability to integrate seamlessly with-
+out compromising the natural language generation
+quality.
+
+Dictionary-based Method
+LLM-based Method
+’should’, ’must’, ’would’
+’must’, ’ought’, ’should’
+’job’, ’pursuit’, ’operation’, ’profession’, ’career’, ’employment’, ’behavior’
+’job’, ’task’, ’work’
+’inside’, ’in’
+’_inside’, ’_inner’, ’_within’
+Table 3: Examples of Redundant Clusters.
+Method
+ROUGE-L
+AUROC
+ChatGLM 3-6b
+11.29
+-
++KGW-Mark
+8.89
+0.8415
++WatME_prompting
+10.23
+0.8514
+Table 4: CLTS Results

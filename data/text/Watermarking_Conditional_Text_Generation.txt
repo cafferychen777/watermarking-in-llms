@@ -1,0 +1,2459 @@
+Watermarking Conditional Text Generation for AI Detection:
+Unveiling Challenges and a Semantic-Aware Watermark Remedy
+Yu Fu1, Deyi Xiong2, Yue Dong1*
+1University of California Riverside
+2Tianjin University
+yfu093@ucr.edu1, dyxiong@tju.edu.cn2, yue.dong@ucr.edu1
+Abstract
+To mitigate potential risks associated with language models
+(LMs), recent AI detection research proposes incorporating
+watermarks into machine-generated text through random vo-
+cabulary restrictions and utilizing this information for detec-
+tion. In this paper, we show that watermarking algorithms
+designed for LMs cannot be seamlessly applied to condi-
+tional text generation (CTG) tasks without a notable decline
+in downstream task performance. To address this issue, we in-
+troduce a simple yet effective semantic-aware watermarking
+algorithm that considers the characteristics of conditional text
+generation with the input context. Compared to the baseline
+watermarks, our proposed watermark yields significant im-
+provements in both automatic and human evaluations across
+various text generation models, including BART and Flan-T5,
+for CTG tasks such as summarization and data-to-text gener-
+ation. Meanwhile, it maintains detection ability with higher
+z-scores but lower AUC scores, suggesting the presence of a
+detection paradox that poses additional challenges for water-
+marking CTG.1
+Introduction
+Language Models (LMs) have demonstrated remarkable ef-
+fectiveness in generating content that closely resembles hu-
+man performances across diverse tasks (Tan et al. 2023;
+Dong et al. 2023; Liu et al. 2023). As large-scale models
+such as ChatGPT (OpenAI 2021) evolve and produce in-
+creasingly human-like content, concerns have surged around
+potential limitations and risks tied to their use (Bender
+et al. 2021), including hallucination (Alkaissi and McFar-
+lane 2023), bias and toxicity (Deshpande et al. 2023), failure
+in commonsense reasoning (Bian et al. 2023), and misinfor-
+mation and malicious use (OpenAI 2023).
+To mitigate potential risks associated with LMs, it’s cru-
+cial to develop methods that differentiate between AI and
+human-generated content. Current AI-detection tools pri-
+marily rely on perplexity-based classifiers, assuming lower
+perplexity in AI-generated text (Solaiman et al. 2019; Jawa-
+har, Abdul-Mageed, and Lakshmanan 2020; Mitchell et al.
+2023; Mitrovi´c, Andreoletti, and Ayoub 2023). Conversely,
+*Corresponding Author
+Copyright © 2024, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+1https://github.com/FYYFU/semantic-watermark
+Original Watermark
+Mandy Patinkin played as Pool Man in episode The
+Big Polliners in episode No, No, It is 1978 in TV
+Series and movie.
+Semantic Watermark
+In 1978, Mandy Patinkin is in the title The Big Fix,
+the role is Pool Man.
+30
+22
+11.82 1e-32
+13.75 2e-43
+Input: (H) [TABLECONTEXT] (R) title (T)
+The Big Fix (H) [TABLECONTEXT] (R) [title]
+(T) Mandy Patinkin (H) The Big Fix (R) role (T)
+Pool Man (H) The Big Fix (R) year (T) 1978
+Target: Mandy Patinkin was the actor for the
+Pool Man in the 1978 movie The Big Fix.
+Num Tokens
+z-score
+p-value
+Figure 1: The outputs with the original watermark (OW)
+(Kirchenbauer et al. 2023) and our proposed semantic-aware
+watermark (SW) on a test example from DART – a data-to-
+text generation benchmark – with parameters γ = 0.1 and
+δ = 5. We expect ∼90% of human-generated texts from the
+red list, whereas AI primarily utilizes the green list. Both
+watermarks yield high z-scores (z > 4), indicating strong
+watermark strength for detection. Yet, OW forces the algo-
+rithm to generate from the red list due to randomly assign-
+ing key source entities (Mandy Patinkin) to it. As δ increases
+(towards a hard watermark), excluding these red tokens risks
+more hallucinations (words with underline).
+an alternative approach is to inject watermarks during gen-
+eration for subsequent detection. For instance, Kirchenbauer
+et al. (2023) proposed using hash function to randomly bi-
+furcate the vocabulary into “green” and “red” lists at each
+decoding step, serving as watermarks. This watermark pro-
+vides reliable detection signals without the need to train
+a classifier and produces high-quality generated texts with
+only a slight perplexity drop in language modeling.
+Different from existing research, our focus is on water-
+marks for conditional text generation (CTG), and we un-
+veil the challenges associated with the use of watermarks
+arXiv:2307.13808v2  [cs.CL]  13 Feb 2024
+
+(Kirchenbauer et al. 2023). Our research findings suggest
+that LM watermarking algorithms cannot be seamlessly ap-
+plied to CTG tasks without a notable decline in perfor-
+mance: the omission of task-specific considerations leads
+to significant decreases observed – up to 96.99% drop with
+hard watermarks and 27.54% drop with soft watermarks – in
+conditional generation tasks including summarization (See,
+Liu, and Manning 2017; Narayan, Cohen, and Lapata 2018)
+and data-to-text generation (Gardent et al. 2017; Nan et al.
+2021). Figure 1 illustrates an example where the randomly
+bifurcated red list (Kirchenbauer et al. 2023) contains key
+entities from the source that has to be generated for the data-
+to-text generation task; the mismatch between context and
+watermark not only impairs detection but also introduces 12
+hallucinated words in a 30-token generation.
+To enhance the effectiveness of watermarks for CTG, we
+propose a simple yet effective semantic-aware watermark-
+ing algorithm that leverages hash function to embed wa-
+termarks, while also taking into account the input context
+and the distinctive characteristics of conditional generation
+tasks. In particular, we strategically bifurcate the vocabulary
+to balance randomness and semantic relatedness to the in-
+put source using word vector similarity. These semantically-
+related tokens can efficiently cover a substantial portion of
+the information that needs to be generated in conditional text
+generation tasks. Consequently, their inclusion in the “green
+list” acts as a buffer, reducing the adverse impact of adding
+watermarks. Compared to the baseline watermarks, our wa-
+termark maintains detection ability with higher z-scores but
+lower AUC scores (higher values are better for both). This
+suggests the presence of a detection paradox that introduces
+additional challenges for watermarking CTG: the prevalent
+human habit of using tokens identical/similar to the input for
+CTG complicates the detection of watermarks and implies a
+trade-off between detection ability and metric score.
+Our contributions can be summarized as follows:
+• We show that directly applying Kirchenbauer et al.
+(2023)’s watermarking method to conditional text gener-
+ation tasks, without task-specific considerations, can lead
+to a significant performance drop (up to 96.99%). This
+significant decline is observed across multiple tasks like
+summarization and data-to-text generation, and various
+text generation models such as BART and Flan-T5.
+• We propose a semantic-aware watermarking algorithm
+that utilizes hash function while considering the input
+context of CTG tasks. Automatic and human evaluations
+on multiple datasets and models indicate that our method
+effectively mitigates quality degradation associated with
+the use of watermarks, while minimizing the trade-off in
+detection.
+Related Work
+Automatic Detection
+The detection of AI-generated text,
+particularly in the context of large language models (LLMs),
+has recently attracted significant research interest (Bakhtin
+et al. 2019; Schuster et al. 2020; Fr¨ohling and Zubiaga 2021;
+Sadasivan et al. 2023; Mitchell et al. 2023). Previous ap-
+proaches have primarily focused on leveraging the perplexi-
+ties of generated texts for detection. For example, Solaiman
+et al. (2019) utilized a classifier to evaluate the total log
+probability of the text, using it as a means to determine
+whether the content originated from a machine. Building on
+this premise, Mitchell et al. (2023) further validated that the
+log probability of machine-generated text diminishes upon
+perturbation, while the log probability of human-written text
+remains unpredictable when perturbed.
+Watermarking
+There has been a recent emergence of wa-
+termarking specific patterns into language models for AI de-
+tection. Zhao, Wang, and Li (2023) focused on injecting se-
+cret sinusoidal signals into the decoding steps for each target
+token by modifying the corresponding probability distribu-
+tion. Kirchenbauer et al. (2023) proposed a method that ran-
+domly bifurcates the vocabulary and modifies the probabil-
+ity distribution during each decoding step, thereby ensuring
+the inclusion of detectable patterns (watermarks) in the gen-
+erated text. Subsequent work by Lee et al. (2023) optimized
+this watermark based on entropy, while Wang et al. (2023)
+introduced a novel watermarking scheme that enables the
+watermark to convey meaningful messages such as user IDs
+or LLM names, expanding its purpose beyond merely in-
+dicating machine-generated text. On the other hand, Yoo
+et al. (2023) and Yang et al. (2023) focused on incorporat-
+ing watermarks through post-processing, allowing for water-
+marking even in the context of black-box LLMs. In contrast
+to the aforementioned papers, our focus is on watermark-
+ing for conditional text generation (CTG) tasks, specifically
+discussing challenges in applying watermarks designed for
+LLMs to CTG tasks, and proposing watermarks that in-
+corporate task-specific characteristics that account for input
+context for CTG.
+Method
+This section provides an overview of the basic principles
+of watermarks, elaborates on our proposed semantic-aware
+method, and discusses how it’s integrated into the water-
+marking procedure for CTG.
+Original Watermark
+Considering a language model with
+parameters denoted by θ, the probability distribution for the
+t-th token in sequence S = {s1, s2, . . . , s|S|} can be formu-
+lated as :
+p(st) = pθ(st|s<t)
+(1)
+By considering all preceding tokens, language models
+(LMs) generate a probability distribution across the vocabu-
+lary and sample tokens accordingly.
+Watermarking is a technique designed to incorporate ro-
+bust detection signals into machine-generated text. Kirchen-
+bauer et al. (2023) propose two methods, namely hard and
+soft watermarks, for adding watermarks to text by imposing
+vocabulary restrictions during each decoding step. Specif-
+ically, the “Hard Red List” watermarking algorithm ran-
+domly divides the vocabulary into “green” and “red” lists
+using a hash function and previously generated tokens. Dur-
+ing the generation process, only tokens from the green list
+can be selected for the t-th position. To detect the presence
+2
+
+of the watermark in the generated text, a statistical analysis
+such as the one proportion z-test can be employed.
+However, randomly partitioning the vocabulary and solely
+selecting words from the green list can hinder the generation
+of crucial tokens that are not included in the green list. As
+an alternative, the “Soft Red List” watermarking approach
+introduces a constant δ to the logit l(t)
+k of tokens in the green
+list during prediction:
+p(t)
+k
+= exp(l(t)
+k + δ)/
+X
+i
+exp(l(t)
+i )
+(2)
+This adjustment ensures that even if there are deterministic
+tokens not included in the green list, they can still be gen-
+erated. We observe that hard watermarks can be seen as a
+special case of soft watermarks, achieved by adding a large
+δ to the tokens in the green list. Therefore, we choose soft
+watermarking algorithm as the unified formulation in our pa-
+per.
+Semantic-Aware Watermark
+In contrast to text generation tasks involving language mod-
+els, conditional text generation (CTG) tasks often exhibit
+significant textual overlap, either at the token level or the
+semantic level. For instance, Chen et al. (2020) demon-
+strate that in the CNN/DailyMail dataset (See, Liu, and
+Manning 2017), over 80% of the tokens found in the sum-
+mary can be located within the original document. Even in
+the case of the XSUM dataset (Narayan, Cohen, and Lap-
+ata 2018), known for its “abstractive” nature, this percent-
+age remains above 60%. Consequently, random watermark-
+ing algorithms, which bifurcate the vocabulary arbitrarily at
+each decoding step, can drastically impair the performance
+of generation models.
+Considering this characteristic of CTG tasks, we pro-
+pose a simple yet effective semantic-aware watermarking
+method to enhance performance. Our approach uses the in-
+put context to extract semantically related tokens, measured
+by word vector similarity to the source. By incorporating se-
+mantically related tokens as a constraint, we ensure the qual-
+ity of the generated output. We then apply the original wa-
+termark and randomly bifurcate the remaining vocabulary.
+To implement this approach, we tokenize the input se-
+quence x to ˆx = {ˆx1, ˆx2, . . . , ˆx|ˆx|}. Next, the tokenized
+sequence ˆx is transformed into contextualized vector rep-
+resentations using the model’s embedding layer. Integrating
+input information into the watermark’s green list is a direct
+and crucial step (step 2 in Algorithm 1), consistent with the
+requirements of CTG tasks where the output is dependent
+on the input. However, it’s crucial to note that output infor-
+mation isn’t solely determined by the input. Thus, relying
+exclusively on input as a constraint may not yield optimal
+results. To overcome this limitation, we broaden the con-
+straints by incorporating token embeddings to measure to-
+ken similarities.
+We extend the constraints to prioritize the inclusion of
+content closely related to the input within the partitioned
+green list, as detailed in Algorithm 1. This strategy effec-
+tively minimizes the impact of random vocabulary partition-
+ing on the quality of generated results. The decision to utilize
+Algorithm 1: Semantic-Aware Watermark
+Input: Input sequence x = {x1, x2, . . . , x|x|}
+Parameter: Conditional model pθ, green list size: γ ∈(0, 1),
+hardness parameter: δ > 0 cluster parameter: k ∈[1, 2, 5, 10]
+Output: Watermarked text y
+1: Get word embeddings and compute the |V | × |V | word simi-
+larity matrix M.
+2: Using input sequence x and parameter k to get semantically
+related tokens S and insert them to “green list” G.
+3: for t = 0, 1, · · · do
+4:
+Apply the conditional model to input sequence x and get a
+logit vector l(t) over the vocabulary V .
+5:
+Compute a hash of token yt−1 and use it to seed a random
+number generator.
+6:
+Using the random number generator and partition the re-
+maining vocabulary into G of size γ|V | −len(S) and a
+“red list” R of size (1 −γ)|V |.
+7:
+Add δ to each green list logit. Apply these modified logits
+to get a probability distribution over V.
+8:
+ˆp(t)
+k
+=
+
+exp(l(t)
+k
++δ)
+P
+i∈R exp(l(t)
+i
+)+P
+i∈G exp(l(t)
+i
++δ),
+k ∈G
+exp(l(t)
+k
+)
+P
+i∈R exp(l(t)
+i
+)+P
+i∈G exp(l(t)
+i
++δ),
+k ∈R
+9:
+Sample the next token yt according to watermarked distri-
+bution ˆp(t).
+10: end for
+model embeddings to acquire semantically related tokens –
+steps 1&2 in Algorithm 1 – is motivated by the following
+reasons:
+• Semantic Relevance: By exploiting model embeddings,
+we capture semantic token relationships. This ensures
+coherent and semantically consistent text generation by
+identifying tokens closely linked to the input.
+• Enhanced Output Quality: Including semantically related
+tokens in the green list elevates the relevance and quality
+of the generated text, aligning it more effectively with the
+CTG task objectives.
+Assume the word embeddings for a specific model have a
+size of |V | × demb, where |V | and demb denote the vocabu-
+lary size and the dimension of the model’s embeddings, re-
+spectively. Each row in this embedding matrix contains the
+representation of a particular indexed token. For each pair of
+token representations, we can calculate the embedding simi-
+larity using measures such as cosine similarity. This process
+allows us to construct a similarity matrix M of size |V |×|V |
+with token indices sorted based on their similarity values
+with respect to the token indexed at each row.
+In our proposed semantic-aware watermarking approach,
+before partitioning the green list, we utilize the input context
+tokens as pivot points for the green list and leverage the sim-
+ilarity matrix M. By combining this similarity matrix with a
+hyperparameter k, we identify the top k semantically related
+tokens for each input token. These semantically related to-
+3
+
+Dataset
+Model
+Method
+R-1
+R-2
+R-L
+Dataset
+Model
+Method
+BLEU
+CNN
+BART-large
+NW
+43.80
+20.88
+40.73
+DART
+BART-large
+NW
+47.78
+OW (Hard)
+33.38
+8.73
+30.61
+OW (Hard)
+6.65 ↓86.1%
+SW (Hard)
+43.46
+20.75
+40.45
+SW (Hard)
+41.04 ↓14.1%
+OW (Soft)
+42.46
+18.33
+39.52
+OW (Soft)
+37.06 ↓22.4%
+SW (Soft)
+43.50
+20.83
+40.62
+SW (Soft)
+44.04 ↓7.8%
+Flan-T5-base
+NW
+41.78
+19.57
+38.66
+Flan-T5-base
+NW
+49.55
+OW (Hard)
+24.47
+5.60
+22.48
+OW (Hard)
+5.35 ↓89.2%
+SW (Hard)
+41.80
+19.80
+38.72
+SW (Hard)
+35.36 ↓28.6%
+OW (Soft)
+38.60
+16.29
+35.90
+OW (Soft)
+39.19 ↓20.9%
+SW (Soft)
+41.90
+19.86
+38.80
+SW (Soft)
+44.18 ↓10.8%
+XSUM
+BART-large
+NW
+45.25
+22.15
+37.03
+WebNLG
+BART-large
+NW
+57.18
+OW (Hard)
+29.60
+7.15
+20.83
+OW (Hard)
+9.25 ↓83.8%
+SW (Hard)
+42.44
+18.64
+33.91
+SW (Hard)
+48.02 ↓16.0%
+OW (Soft)
+40.07
+16.51
+31.50
+OW (Soft)
+44.58 ↓22.1%
+SW (Soft)
+43.83
+20.39
+35.42
+SW (Soft)
+52.50 ↓8.2%
+Flan-T5-base
+NW
+39.51
+16.92
+31.90
+Flan-T5-base
+NW
+59.77
+OW (Hard)
+22.98
+4.80
+16.66
+OW (Hard)
+1.80 ↓97.0%
+SW (Hard)
+37.67
+14.69
+29.94
+SW (Hard)
+40.89 ↓31.6%
+OW (Soft)
+35.23
+12.58
+27.52
+OW (Soft)
+45.42 ↓24.0%
+SW (Soft)
+38.79
+15.91
+31.03
+SW (Soft)
+53.27 ↓10.9%
+Table 1: Main results of comparing different watermarking strategies across various datasets and models. NW (no watermark)
+serves as the baseline, and adding a watermark is expected to decrease performance to trade-off detection. OW (original water-
+mark) denotes the use of the Soft or Hard watermark (Kirchenbauer et al. 2023) with hyperparameters γ = 0.5 and δ ∈{2, 10}.
+Our proposed SW (semantic-aware watermark) approach employs semantically related tokens to partition the green and red
+lists, with hyperparameters k = 1/2/5/10, while keeping the same values of γ and δ to ensure a fair comparison.
+kens are then included in the green list, while the remaining
+portion of the vocabulary is randomly partitioned. This par-
+titioning is carried out based on the mathematical equation
+presented in step 8 of Algorithm 1.
+Experiments and Results
+This section provides an overview of the datasets and models
+utilized in the experiments. We also present the main exper-
+imental results, including both automatic and human evalu-
+ations.
+Datasets and Models
+We conducted experiments to assess the generalization abil-
+ity of our proposed method by utilizing models with dif-
+ferent parameter sizes and architectures, including BART-
+base, BART-large (Lewis et al. 2020), Flan-T5-small, and
+Flan-T5-base (Chung et al. 2022). Our focus was on two
+distinct conditional text generation tasks: summarization -
+CNN/DailyMail (See, Liu, and Manning 2017) and XSUM
+(Narayan, Cohen, and Lapata 2018), and data-to-text gen-
+eration - DART (Nan et al. 2021) and WebNLG (Gardent
+et al. 2017). These datasets are widely recognized for eval-
+uating text summarization and data-to-text generation mod-
+els, respectively. By conducting comprehensive evaluations
+across multiple datasets, tasks, and models, our objective
+was to thoroughly compare the differences between the orig-
+inal watermarking algorithm (Kirchenbauer et al. 2023) and
+our proposed semantic-aware watermarking approach.
+Main Results
+Our main experimental results are presented in Table 1. The
+summarization task was evaluated using the ROUGE metric
+(Lin 2004), while the data-to-text generation task was evalu-
+ated using BLEU (Papineni et al. 2002). The table illustrates
+the performance of the models under various watermarking
+methods, highlighting the enhancements achieved by incor-
+porating semantic constraints in watermarking for both the
+summarization and data-to-text generation tasks. Our pro-
+posed semantic-aware watermarking method exhibits sig-
+nificant improvements in comparison to the original water-
+marking method across all datasets and models.
+Additionally, we observe that hard watermarks invariably
+cause a greater decline in CTG performance compared to
+soft watermarks (especially ROUGE-2 for summarization
+and BLEU for data-to-text generation). The hard watermarks
+designed for language models (Kirchenbauer et al. 2023) es-
+sentially completely forbid generation from the red list that
+might contain key input context, potentially leading to near-
+ineffective generations with almost no overlap with the ref-
+4
+
+SW (ours) vs. OW
+Judge 1
+Judge 2
+Judge 3
+Avg.
+SW (ours) preferred
+58%
+54%
+54%
+55.33%
+Table 2: Human evaluation results on 100 randomly sam-
+pled examples, accompanied by generations from BART-
+base with original soft or semantic-aware watermarks, pre-
+sented in a random and anonymized order. Each example
+was independently annotated by three annotators, resulting
+in an average pairwise inter-annotator agreement of 63.33%.
+erence generations. For example, in the data-to-text genera-
+tion task, the original hard watermarking method adversely
+affects Flan-T5-small’s performance on WebNLG, resulting
+in a decrease of over 57.97 BLEU points with 97.0% of per-
+formance drop. In contrast, our semantic-aware watermark
+effectively mitigates the impact of adding the watermark,
+demonstrating an 39.09 BLEU point increase over the orig-
+inal watermark with a performance improvement of 21.67
+times.
+More notably, on the CNN/DailyMail dataset, our
+semantic-aware watermarking method applied to the Flan-
+T5-base models not only mitigates the drawbacks of wa-
+termark injection but also surpasses the performance of the
+original generation without watermark. This can be credited
+to the nature of the summarization task, where a consid-
+erable amount of the target information is already present
+in the input. The semantic-aware watermarking method en-
+hances the generation process by effectively harnessing this
+input, enabling it to capture the essential details for cre-
+ating high-quality summaries. This synergy between input
+and target data contributes to the superior performance of
+the Flan-T5-small and Flan-T5-base models when utilizing
+the semantic-aware watermarking method in summarization
+tasks.
+Human Evaluation
+In addition, we conducted a human
+evaluation comparing BART-base with the original and our
+proposed watermarks on the XSUM dataset. The human
+judges2 were presented with reference summaries and gen-
+erations from different watermarking algorithms in a ran-
+dom and anonymized order. The judges were asked to eval-
+uate which system’s summary was better and more similar to
+the reference. They were instructed to read the source article
+only when they were unable to decide or needed additional
+information3.
+Table 2 presents the results of the human evaluation. With
+a confidence level of 95% and one-sided A/B tests, the
+semantic-aware watermark exhibits a significantly higher
+preference according to human judges (p = 0.0358). Specif-
+ically, the preference for the semantic-aware watermark
+(55.33%) surpasses that of the original watermark (44.67%)
+by a substantial margin of 10.66%. Moreover, pairwise inter-
+2All judges are native English speakers with a minimum of a
+bachelor’s degree and were compensated at a rate of $19.5/h.
+3We made the decision to make reading the source article op-
+tional for the judges in order to prevent creating a significant cog-
+nitive burden and to encourage them to take shortcuts.
+2
+4
+6
+8
+10
+0
+5
+10
+15
+20
+z-score
+=0.05
+OW
+SW(k=1)
+SW(k=2)
+SW(k=5)
+SW(k=10)
+Figure 2: Watermark detection: average z-score under dif-
+ferent δ settings (x-axis). Higher z-scores indicate stronger
+watermark detection confidence. We can see that hard wa-
+termarks (greater δ) are easier to detect but lead to a more
+significant decline in CTG performance.
+2
+4
+6
+8
+10
+0.6
+0.7
+0.8
+0.9
+1.0
+AUC score
+=0.05
+OW
+SW(k=1)
+SW(k=2)
+SW(k=5)
+SW(k=10)
+Figure 3: Watermark detection: AUC scores under different
+δ settings. Higher AUC scores indicates a better detection
+performances.
+annotator agreement was assessed, resulting in agreement
+percentages of 70%, 66%, and 54% for the respective eval-
+uations. These findings strongly support the effectiveness of
+the semantic-aware watermarking method, highlighting its
+ability to enhance the quality of summarization outputs.
+Watermark Strength and Detection
+To evaluate the quality of watermarking for detection, we
+followed established research (Kirchenbauer et al. 2023;
+Yang et al. 2023) and assessed the strength using the av-
+erage z-score and the area under the curve (AUC) score.
+Figure 2 and Figure 3 present the z-score and AUC results,
+respecively.
+A higher z-score generally indicates a greater presence
+of tokens from the “green list” in the generated results, in-
+creasing the likelihood of successful detection. However, in
+the context of conditional text generation tasks, maintain-
+ing consistency in the length of the generated results with
+the original model is crucial. It has been observed that the
+z-score tends to increase with the length of the generated
+5
+
+2
+4
+6
+8
+10
+k
+50
+60
+70
+80
+90
+Coverage
+BART-base
+2
+4
+6
+8
+10
+k
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+Percent
+BART-base
+CNN
+XSUM
+DART
+WEBNLG
+Figure 4: The coverage of target tokens by semantically related tokens varies with different datasets and values of the hyperpa-
+rameter k on BART-base. Increasing the value of k improves the coverage of semantic tokens, aligning with our objective and
+motivation.
+text (Kirchenbauer et al. 2023). To address this, we intro-
+duce an additional penalty term to the z-score, incorporat-
+ing the ratio of the average length of the generated results to
+the average length of the original model’s output without the
+watermark.
+As seen in Figure 2, the semantic-aware watermarking
+method significantly outperforms its counterpart in terms of
+z-score, reflecting a higher inclusion of “green list” tokens in
+the generated output. Under normal circumstances (e.g., lan-
+guage modeling), a higher average z-score indicates stronger
+detectability (Kirchenbauer et al. 2023). However, as Fig-
+ure 3 illustrates, the AUC curve for the original watermark-
+ing method surpasses ours, as our constructed green lists in-
+corporate more input tokens that humans would commonly
+use. Consequently, human-generated text also contains more
+green list tokens.
+The disparity between the z-scores and AUC scores of
+semantic-aware watermarks highlights an additional chal-
+lenge in applying watermarks for CTG: the common hu-
+man practice of utilizing input-similar tokens in CTG
+introduces complexity to the watermark detection pro-
+cess. Our method, despite showing remarkable improve-
+ments in ROUGE or BLEU metrics and hence bearing closer
+resemblance to the reference, contributes to a slight dip in
+the final AUC scores. This scenario indicates a trade-off
+between enhancing the ROUGE or BLEU scores, indica-
+tive of increased similarity to the reference, and preserv-
+ing detectability. Notwithstanding this, our empirical results
+compellingly argue that the significant rise in performance
+(up to ∼2167%) outweighs the detection decreases (Avg.
+∼12.6%); further increasing this advantage margin remains
+an area for future exploration.
+Analysis
+This section analyzes the hyperparameters, focusing on: k,
+introduced by our semantic watermark; γ and δ, inherited
+from Kirchenbauer et al. (2023).
+Method
+BLEU
+γ
+γ = 0.25
+γ = 0.5
+γ = 0.75
+NW
+45.90
+-
+-
+OW
+37.32
+35.99
+39.01
+SW (k=1)
+37.23
+38.46
+41.36
+SW (k=2)
+38.10
+39.29
+42.01
+SW (k=5)
+38.87
+38.63
+42.24
+SW (k=10)
+41.37
+42.89
+44.59
+Table 3: The effect of the hyperparameter k on the re-
+sults of the DART dataset using the BART-base with γ ∈
+{0.25, 0.5, 0.75} and δ = 2.
+Semantic k Analysis
+The semantic-aware watermark uses a hyperparameter, k, to
+determine the extent of semantically related tokens, derived
+from word embedding similarities during decoding, that are
+integrated into the green list. Table 3 shows that increas-
+ing k in semantic-aware watermarks improve the CTG
+performance. We hypothesize that this improvement stems
+from that increasing k includes more reference tokens in the
+green list, leading to a broader coverage of tokens that hu-
+mans typically use for CTG generation.
+To validate our hypothesis and study the relationship be-
+tween k and target token coverage, we carried out exper-
+iments by measuring the overlaps between semantically re-
+lated tokens and the reference target tokens under different k
+values. Figure 4 (left) presents curves, which, with increas-
+ing k, demonstrate a correlation with an increased propor-
+tion of target unigram text tokens covered by semantically
+related tokens.
+Interestingly, when we adjust the setup to measure the
+relative percentage of coverage increase with higher k val-
+ues, we observe different trends for various CTG tasks. Fig-
+ure 4 (right) indicates that watermarks with larger k values
+have a more significant performance improvement impact
+on data-to-text generation tasks compared to summarization
+6
+
+Soft
+Hard
+Green list size 
+δ
+Figure 5: The impact of γ on DART results with settings of
+δ = 2/5/10. γ controls the size of the green list. From δ = 2
+to δ = 5, the watermarking method tends to change from a
+soft watermark to a hard watermark, and the probability of
+generating tokens from the green list gradually increases.
+tasks. This observation is also reflected in the findings that
+an increased k leads to substantial improvements in BLEU
+scores for data-to-text generation, compared to the ROUGE
+score improvements for summarization (More details in Ap-
+pendix). Specifically, DART and WEBNLG show greater
+sensitivity to k, where its increase yields better results.
+γ and δ Analysis
+The soft watermarking method (Kirchenbauer et al. 2023)
+depends on two hyperparameters: γ and δ. γ regulates the
+size of the green list during partitioning, whereas δ dictates
+the intensity of watermarks applied to the logits of green list
+tokens. Essentially, a very large δ (e.g., 10) is equivalent to
+the hard watermarks that entirely prohibits tokens from the
+red list from being generated. This section compares origi-
+nal and semantic-aware watermarks under varying γ and δ
+values, demonstrating that our proposed watermark consis-
+tently outperforms the original across different hyperparam-
+eter settings.
+Increasing γ incorporates more words into the green list,
+typically lessening the watermark’s impact on model per-
+formance. Surprisingly, Table 3 shows that the original wa-
+termarking method performs poorly when γ = 0.5. To fur-
+ther explore possible reasons for this and to test our method
+under different setups, we conducted a comparative anal-
+ysis with varying γ and δ set to 2, 5, and 10. Figure 5
+indicates that the semantic-aware watermark consistently
+outperforms the original watermark, except when δ is set
+2
+4
+6
+8
+10
+0
+10
+20
+30
+40
+BLEU
+=0.05
+OW
+SW(k=1)
+SW(k=2)
+SW(k=5)
+SW(k=10)
+Figure 6: The impact of δ, which controls the extent of en-
+hancement applied to the logits, on the DART results.
+Dataset
+k
+1
+2
+5
+10
+DART
+0.0004
+0.0009
+0.0020
+0.0037
+WebNLG
+0.0005
+0.0009
+0.0022
+0.0039
+Table 4: The percentage of semantically related tokens to the
+size of the vocabulary V .
+to 2 with relatively small γ values. Decreasing γ reduces
+the number of selected and enhanced tokens due to the
+smaller green list size. As a result, the model’s performance
+is expected to gradually decrease with a smaller watermark.
+However, the change curve of the original method in the
+γ < 0.2 (when δ=2) range deviates from these expectations.
+We hypothesize that this irregularity arises from the neg-
+ligible impact of soft watermark when γ is small. This hap-
+pens when soft watermarks with an extremely small green
+list scarcely affect logits predictions. To confirm this, we ex-
+amined the impact of varying δ on the BART-base model’s
+performance using the DART dataset under extrem small γ,
+as shown in Figure 6. We observe that when γ is set ex-
+tremely low (γ = 0.05) in the soft watermark settings (i.e.,
+δ ≤4), there is hardly any performance trade-off upon
+adding watermarks, suggesting ineffective watermarks for
+detection.
+In addition, to ensure that semantically related tokens in-
+cluded in the green list for the semantic-aware watermark do
+not exceed the green list size, especially the ones obtained
+with a large k, we calculate the percentage of these seman-
+tically related tokens relative to the overall vocabulary size.
+Table 4 reveals that it is significantly lower than the green
+list size dictated by γ.
+Conclusion
+Our study reveals a significant performance drop when ran-
+dom watermarks are directly applied to conditional text gen-
+eration tasks without considering the task-specific context.
+To tackle this challenge, we propose a semantic-aware wa-
+termarking algorithm that incorporates hash function and
+carefully takes into account the input context of conditional
+7
+
+generation tasks. We extensively evaluated our method on
+diverse datasets and models, including summarization, data-
+to-text generation, and various text generation models like
+BART and Flan-T5. The results demonstrate that our pro-
+posed method effectively mitigates the quality degradation
+associated with watermarking techniques, as confirmed by
+both automatic and human evaluations. These findings em-
+phasize the importance of task-specific approaches when
+applying watermarking methods to ensure optimal perfor-
+mance in conditional text generation tasks.
+References
+Alkaissi, H.; and McFarlane, S. I. 2023. Artificial hallucina-
+tions in ChatGPT: implications in scientific writing. Cureus,
+15(2).
+Bakhtin, A.; Gross, S.; Ott, M.; Deng, Y.; Ranzato, M.; and
+Szlam, A. 2019. Real or Fake? Learning to Discriminate
+Machine from Human Generated Text. arXiv:1906.03351.
+Bender, E. M.; Gebru, T.; McMillan-Major, A.; and
+Shmitchell, S. 2021.
+On the Dangers of Stochastic Par-
+rots: Can Language Models Be Too Big? In Proceedings of
+the 2021 ACM conference on fairness, accountability, and
+transparency, 610–623.
+Bian, N.; Han, X.; Sun, L.; Lin, H.; Lu, Y.; and He, B.
+2023. Chatgpt is a knowledgeable but inexperienced solver:
+An investigation of commonsense problem in large language
+models. arXiv preprint arXiv:2303.16421.
+Chen, Y.; Liu, P.; Zhong, M.; Dou, Z.-Y.; Wang, D.; Qiu, X.;
+and Huang, X. 2020. CDEvalSumm: An Empirical Study
+of Cross-Dataset Evaluation for Neural Summarization Sys-
+tems. In Findings of the Association for Computational Lin-
+guistics: EMNLP 2020, 3679–3691. Online: Association for
+Computational Linguistics.
+Chung, H. W.; Hou, L.; Longpre, S.; Zoph, B.; Tay, Y.; Fe-
+dus, W.; Li, Y.; Wang, X.; Dehghani, M.; Brahma, S.; Web-
+son, A.; Gu, S. S.; Dai, Z.; Suzgun, M.; Chen, X.; Chowd-
+hery, A.; Castro-Ros, A.; Pellat, M.; Robinson, K.; Val-
+ter, D.; Narang, S.; Mishra, G.; Yu, A.; Zhao, V.; Huang,
+Y.; Dai, A.; Yu, H.; Petrov, S.; Chi, E. H.; Dean, J.; De-
+vlin, J.; Roberts, A.; Zhou, D.; Le, Q. V.; and Wei, J.
+2022.
+Scaling Instruction-Finetuned Language Models.
+arXiv:2210.11416.
+Deshpande, A.; Murahari, V.; Rajpurohit, T.; Kalyan, A.;
+and Narasimhan, K. 2023.
+Toxicity in chatgpt: Analyz-
+ing persona-assigned language models.
+arXiv preprint
+arXiv:2304.05335.
+Dong,
+Y.;
+Jiang,
+X.;
+Jin,
+Z.;
+and
+Li,
+G.
+2023.
+Self-collaboration
+Code
+Generation
+via
+ChatGPT.
+arXiv:2304.07590.
+Fr¨ohling, L.; and Zubiaga, A. 2021. Feature-based detection
+of automated language models: tackling GPT-2, GPT-3 and
+Grover. PeerJ Computer Science, 7: e443.
+Gardent, C.; Shimorina, A.; Narayan, S.; and Perez-
+Beltrachini, L. 2017. The WebNLG Challenge: Generating
+Text from RDF Data. In Proceedings of the 10th Interna-
+tional Conference on Natural Language Generation, 124–
+133. Santiago de Compostela, Spain: Association for Com-
+putational Linguistics.
+Jawahar, G.; Abdul-Mageed, M.; and Lakshmanan, L., V.S.
+2020.
+Automatic Detection of Machine Generated Text:
+A Critical Survey.
+In Proceedings of the 28th Inter-
+national Conference on Computational Linguistics, 2296–
+2309. Barcelona, Spain (Online): International Committee
+on Computational Linguistics.
+Kirchenbauer, J.; Geiping, J.; Wen, Y.; Katz, J.; Miers, I.;
+and Goldstein, T. 2023. A Watermark for Large Language
+Models. arXiv:2301.10226.
+Lee, T.; Hong, S.; Ahn, J.; Hong, I.; Lee, H.; Yun, S.; Shin,
+J.; and Kim, G. 2023. Who Wrote this Code? Watermarking
+for Code Generation. arXiv:2305.15060.
+Lewis, M.; Liu, Y.; Goyal, N.; Ghazvininejad, M.; Mo-
+hamed, A.; Levy, O.; Stoyanov, V.; and Zettlemoyer, L.
+2020. BART: Denoising Sequence-to-Sequence Pre-training
+for Natural Language Generation, Translation, and Compre-
+hension. In Proceedings of the 58th Annual Meeting of the
+Association for Computational Linguistics, 7871–7880. On-
+line: Association for Computational Linguistics.
+Lin, C.-Y. 2004. ROUGE: A Package for Automatic Evalu-
+ation of Summaries. In Text Summarization Branches Out,
+74–81. Barcelona, Spain: Association for Computational
+Linguistics.
+Liu, J.; Xia, C. S.; Wang, Y.; and Zhang, L. 2023.
+Is
+Your Code Generated by ChatGPT Really Correct? Rigor-
+ous Evaluation of Large Language Models for Code Gener-
+ation. arXiv:2305.01210.
+Mitchell, E.; Lee, Y.; Khazatsky, A.; Manning, C. D.;
+and Finn, C. 2023.
+DetectGPT: Zero-Shot Machine-
+Generated Text Detection using Probability Curvature.
+arXiv:2301.11305.
+Mitrovi´c, S.; Andreoletti, D.; and Ayoub, O. 2023. Chat-
+GPT or Human? Detect and Explain. Explaining Decisions
+of Machine Learning Model for Detecting Short ChatGPT-
+generated Text. arXiv:2301.13852.
+Nan, L.; Radev, D.; Zhang, R.; Rau, A.; Sivaprasad, A.;
+Hsieh, C.; Tang, X.; Vyas, A.; Verma, N.; Krishna, P.; Liu,
+Y.; Irwanto, N.; Pan, J.; Rahman, F.; Zaidi, A.; Mutuma,
+M.; Tarabar, Y.; Gupta, A.; Yu, T.; Tan, Y. C.; Lin, X. V.;
+Xiong, C.; Socher, R.; and Rajani, N. F. 2021.
+DART:
+Open-Domain Structured Data Record to Text Generation.
+In Proceedings of the 2021 Conference of the North Ameri-
+can Chapter of the Association for Computational Linguis-
+tics: Human Language Technologies, 432–447. Online: As-
+sociation for Computational Linguistics.
+Narayan, S.; Cohen, S. B.; and Lapata, M. 2018.
+Don’t
+Give Me the Details, Just the Summary! Topic-Aware Con-
+volutional Neural Networks for Extreme Summarization. In
+Proceedings of the 2018 Conference on Empirical Methods
+in Natural Language Processing, 1797–1807. Brussels, Bel-
+gium: Association for Computational Linguistics.
+OpenAI. 2021. Chatgpt: Optimizing language model for di-
+alogue. https://www.openai.com/blog/chatgpt/. Accessed:
+2023-01-10.
+8
+
+OpenAI. 2023. GPT-4 Technical Report. arXiv:2303.08774.
+Papineni, K.; Roukos, S.; Ward, T.; and Zhu, W.-J. 2002.
+Bleu: a Method for Automatic Evaluation of Machine Trans-
+lation. In Proceedings of the 40th Annual Meeting of the As-
+sociation for Computational Linguistics, 311–318. Philadel-
+phia, Pennsylvania, USA: Association for Computational
+Linguistics.
+Sadasivan, V. S.; Kumar, A.; Balasubramanian, S.; Wang,
+W.; and Feizi, S. 2023. Can AI-Generated Text be Reliably
+Detected? arXiv:2303.11156.
+Schuster, T.; Schuster, R.; Shah, D. J.; and Barzilay, R. 2020.
+The Limitations of Stylometry for Detecting Machine-
+Generated Fake News. Computational Linguistics, 46(2):
+499–510.
+See, A.; Liu, P. J.; and Manning, C. D. 2017. Get To The
+Point: Summarization with Pointer-Generator Networks. In
+Proceedings of the 55th Annual Meeting of the Associa-
+tion for Computational Linguistics (Volume 1: Long Papers),
+1073–1083. Vancouver, Canada: Association for Computa-
+tional Linguistics.
+Solaiman, I.; Brundage, M.; Clark, J.; Askell, A.; Herbert-
+Voss, A.; Wu, J.; Radford, A.; Krueger, G.; Kim, J. W.;
+Kreps, S.; McCain, M.; Newhouse, A.; Blazakis, J.;
+McGuffie, K.; and Wang, J. 2019. Release Strategies and
+the Social Impacts of Language Models. arXiv:1908.09203.
+Tan, Y.; Min, D.; Li, Y.; Li, W.; Hu, N.; Chen, Y.; and Qi,
+G. 2023. Can ChatGPT Replace Traditional KBQA Mod-
+els? An In-depth Analysis of GPT family LLMs’ Question
+Answering Performance. arXiv:2303.07992.
+Wang, L.; Yang, W.; Chen, D.; Zhou, H.; Lin, Y.; Meng, F.;
+Zhou, J.; and Sun, X. 2023. Towards Codable Text Water-
+marking for Large Language Models. arXiv:2307.15992.
+Yang, X.; Chen, K.; Zhang, W.; Liu, C.; Qi, Y.; Zhang, J.;
+Fang, H.; and Yu, N. 2023. Watermarking Text Generated
+by Black-Box Language Models. arXiv:2305.08883.
+Yoo, K.; Ahn, W.; Jang, J.; and Kwak, N. 2023.
+Robust
+Multi-bit Natural Language Watermarking through Invari-
+ant Features. In Proceedings of the 61st Annual Meeting
+of the Association for Computational Linguistics (Volume 1:
+Long Papers), 2092–2115. Toronto, Canada: Association for
+Computational Linguistics.
+Zhao, X.; Wang, Y.-X.; and Li, L. 2023.
+Protecting
+Language Generation Models via Invisible Watermarking.
+arXiv:2302.03162.
+9
+
+Appendix
+Comprehensive Results
+In this section, we furnish a detailed analysis of our exper-
+imental outcomes to augment the findings presented in Ta-
+ble 1, Figure 3, Figure 2, Figure 4, Figure 6. These encom-
+pass comparative evaluations conducted across diverse mod-
+els and datasets, under a variety of experimental conditions.
+2
+4
+6
+8
+10
+50
+60
+70
+80
+90
+Coverage
+BART-base
+2
+4
+6
+8
+10
+50
+60
+70
+80
+90
+BART-large
+CNN
+XSUM
+DART
+WEBNLG
+2
+4
+6
+8
+10
+k
+50
+60
+70
+80
+90
+Coverage
+FLAN-t5-small
+2
+4
+6
+8
+10
+k
+50
+60
+70
+80
+90
+FLAN-t5-base
+2
+4
+6
+8
+10
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+Percent
+BART-base
+2
+4
+6
+8
+10
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+BART-large
+CNN
+XSUM
+DART
+WEBNLG
+2
+4
+6
+8
+10
+k
+0.00
+0.02
+0.04
+0.06
+0.08
+0.10
+0.12
+Percent
+FLAN-t5-small
+2
+4
+6
+8
+10
+k
+0.00
+0.02
+0.04
+0.06
+0.08
+0.10
+0.12
+FLAN-t5-base
+Figure 7: The coverage of target tokens by semantically re-
+lated tokens varies with different datasets and values of the
+hyperparameter k. Increasing the value of k improves the
+coverage of semantic tokens, aligning with our objective and
+motivation.
+2
+4
+6
+8
+10
+0
+10
+20
+30
+40
+BLEU
+=0.05
+2
+4
+6
+8
+10
+0
+10
+20
+30
+40
+=0.10
+OW
+SW(k=1)
+SW(k=2)
+SW(k=5)
+SW(k=10)
+2
+4
+6
+8
+10
+0
+10
+20
+30
+40
+BLEU
+=0.15
+2
+4
+6
+8
+10
+0
+10
+20
+30
+40
+=0.20
+Figure 8: The impact of δ, which controls the extent of en-
+hancement applied to the logits, on the DART results.
+2
+4
+6
+8
+10
+0
+5
+10
+15
+20
+z-score
+=0.05
+2
+4
+6
+8
+10
+0.0
+2.5
+5.0
+7.5
+10.0
+12.5
+=0.10
+OW
+SW(k=1)
+SW(k=2)
+SW(k=5)
+SW(k=10)
+2
+4
+6
+8
+10
+0
+2
+4
+6
+8
+10
+z-score
+=0.15
+2
+4
+6
+8
+10
+0
+2
+4
+6
+8
+=0.20
+Figure 9: Watermark detection: average z-score under dif-
+ferent δ setting.
+2
+4
+6
+8
+10
+0.6
+0.7
+0.8
+0.9
+1.0
+AUC score
+=0.05
+2
+4
+6
+8
+10
+0.6
+0.7
+0.8
+0.9
+1.0
+=0.10
+OW
+SW(k=1)
+SW(k=2)
+SW(k=5)
+SW(k=10)
+2
+4
+6
+8
+10
+0.6
+0.7
+0.8
+0.9
+1.0
+AUC score
+=0.15
+2
+4
+6
+8
+10
+0.6
+0.7
+0.8
+0.9
+1.0
+=0.20
+Figure 10: Watermark detection: AUC scores under differ-
+ent δ settings are presented. A higher AUC score indicates a
+better detection performance.
+10
+
+Dataset
+model
+method
+γ and k
+ROUGE-1
+ROUGE-2
+ROUGE-L
+Dataset
+model
+method
+γ and k
+BLEU
+CNN
+BART-base
+NW
+-
+42.02
+19.46
+39.04
+DART
+BART-base
+NW
+-
+45.90
+OW
+γ = 0.25
+39.65
+17.28
+36.84
+OW
+γ = 0.25
+37.32
+SW (ours)
+γ = 0.25 + k = 1
+40.93
+18.81
+37.68
+SW (ours)
+γ = 0.25 + k = 1
+37.23
+SW (ours)
+γ = 0.25 + k = 2
+41.34
+19.12
+38.20
+SW (ours)
+γ = 0.25 + k = 2
+38.10
+SW (ours)
+γ = 0.25 + k = 5
+41.36
+19.14
+38.21
+SW (ours)
+γ = 0.25 + k = 5
+38.87
+SW (ours)
+γ = 0.25 + k = 10
+41.45
+19.22
+38.28
+SW (ours)
+γ = 0.25 + k = 10
+41.37
+OW
+γ = 0.5
+38.13
+16.56
+35.33
+OW
+γ = 0.5
+35.99
+SW (ours)
+γ = 0.5 + k = 1
+40.93
+18.81
+37.68
+SW (ours)
+γ = 0.5 + k = 1
+38.46
+SW (ours)
+γ = 0.5 + k = 2
+41.46
+19.17
+38.37
+SW (ours)
+γ = 0.5 + k = 2
+39.29
+SW (ours)
+γ = 0.5 + k = 5
+41.65
+19.30
+38.54
+SW (ours)
+γ = 0.5 + k = 5
+38.36
+SW (ours)
+γ = 0.5 + k = 10
+41.59
+19.28
+38.49
+SW (ours)
+γ = 0.5 + k = 10
+42.89
+OW
+γ = 0.75
+40.47
+18.08
+37.71
+OW
+γ = 0.75
+39.01
+SW (ours)
+γ = 0.75 + k = 1
+41.82
+19.33
+38.73
+SW (ours)
+γ = 0.75 + k = 1
+41.36
+SW (ours)
+γ = 0.75 + k = 2
+41.73
+19.29
+29.01
+SW (ours)
+γ = 0.75 + k = 2
+42.01
+SW (ours)
+γ = 0.75 + k = 5
+41.78
+19.34
+38.75
+SW (ours)
+γ = 0.75 + k = 5
+42.24
+SW (ours)
+γ = 0.75 + k = 10
+41.84
+19.38
+38.80
+SW (ours)
+γ = 0.75 + k = 10
+44.59
+BART-large
+NW
+-
+43.80
+20.88
+40.73
+BART-large
+NW
+-
+47.78
+OW
+γ = 0.25
+42.17
+18.40
+39.26
+OW
+γ = 0.25
+38.66
+SW (ours)
+γ = 0.25 + k = 1
+43.31
+20.61
+40.25
+SW (ours)
+γ = 0.25 + k = 1
+38.08
+SW (ours)
+γ = 0.25 + k = 2
+43.35
+20.68
+40.31
+SW (ours)
+γ = 0.25 + k = 2
+39.24
+SW (ours)
+γ = 0.25 + k = 5
+43.41
+20.73
+40.38
+SW (ours)
+γ = 0.25 + k = 5
+39.71
+SW (ours)
+γ = 0.25 + k = 10
+43.50
+20.82
+40.50
+SW (ours)
+γ = 0.25 + k = 10
+41.81
+OW
+γ = 0.5
+42.46
+18.33
+39.52
+OW
+γ = 0.5
+37.07
+SW (ours)
+γ = 0.5 + k = 1
+43.38
+20.71
+40.34
+SW (ours)
+γ = 0.5 + k = 1
+39.63
+SW (ours)
+γ = 0.5 + k = 2
+43.50
+20.83
+40.62
+SW (ours)
+γ = 0.5 + k = 2
+40.26
+SW (ours)
+γ = 0.5 + k = 5
+43.49
+20.81
+40.47
+SW (ours)
+γ = 0.5 + k = 5
+42.03
+SW (ours)
+γ = 0.5 + k = 10
+43.50
+20.82
+40.50
+SW (ours)
+γ = 0.5 + k = 10
+44.04
+OW
+γ = 0.75
+43.13
+19.55
+40.16
+OW
+γ = 0.75
+40.69
+SW (ours)
+γ = 0.75 + k = 1
+43.46
+20.76
+40.43
+SW (ours)
+γ = 0.75 + k = 1
+42.71
+SW (ours)
+γ = 0.75 + k = 2
+43.46
+20.76
+40.51
+SW (ours)
+γ = 0.75 + k = 2
+44.27
+SW (ours)
+γ = 0.75 + k = 5
+43.57
+20.88
+40.56
+SW (ours)
+γ = 0.75 + k = 5
+44.22
+SW (ours)
+γ = 0.75 + k = 10
+43.53
+20.87
+40.54
+SW (ours)
+γ = 0.75 + k = 10
+45.75
+Flan-T5-small
+NW
+-
+38.96
+17.35
+35.84
+Flan-T5-small
+NW
+-
+47.99
+OW
+γ = 0.25
+35.44
+14.46
+32.84
+OW
+γ = 0.25
+37.47
+SW (ours)
+γ = 0.25 + k = 1
+39.75
+17.86
+36.56
+SW (ours)
+γ = 0.25 + k = 1
+40.70
+SW (ours)
+γ = 0.25 + k = 2
+39.86
+17.96
+36.68
+SW (ours)
+γ = 0.25 + k = 2
+40.77
+SW (ours)
+γ = 0.25 + k = 5
+39.82
+17.91
+36.64
+SW (ours)
+γ = 0.25 + k = 5
+40.63
+SW (ours)
+γ = 0.25 + k = 10
+39.82
+17.91
+36.64
+SW (ours)
+γ = 0.25 + k = 10
+40.58
+OW
+γ = 0.5
+35.51
+14.56
+32.90
+OW
+γ = 0.5
+36.32
+SW (ours)
+γ = 0.5 + k = 1
+39.76
+17.88
+36.58
+SW (ours)
+γ = 0.5 + k = 1
+41.66
+SW (ours)
+γ = 0.5 + k = 2
+39.86
+17.95
+36.68
+SW (ours)
+γ = 0.5 + k = 2
+42.52
+SW (ours)
+γ = 0.5 + k = 5
+39.83
+17.91
+36.65
+SW (ours)
+γ = 0.5 + k = 5
+42.65
+SW (ours)
+γ = 0.5 + k = 10
+39.80
+17.90
+36.63
+SW (ours)
+γ = 0.5 + k = 10
+42.61
+OW
+γ = 0.75
+37.15
+15.83
+34.30
+OW
+γ = 0.75
+39.93
+SW (ours)
+γ = 0.75 + k = 1
+39.81
+17.91
+36.61
+SW (ours)
+γ = 0.75 + k = 1
+45.16
+SW (ours)
+γ = 0.75 + k = 2
+39.85
+17.94
+36.68
+SW (ours)
+γ = 0.75 + k = 2
+45.04
+SW (ours)
+γ = 0.75 + k = 5
+39.83
+17.91
+36.66
+SW (ours)
+γ = 0.75 + k = 5
+45.01
+SW (ours)
+γ = 0.75 + k = 10
+39.83
+17.92
+36.66
+SW (ours)
+γ = 0.75 + k = 10
+45.00
+Flan-T5-base
+NW
+-
+41.78
+19.57
+38.66
+Flan-T5-base
+NW
+-
+49.55
+OW
+γ = 0.25
+38.24
+16.12
+35.59
+OW
+γ = 0.25
+38.92
+SW (ours)
+γ = 0.25 + k = 1
+41.70
+19.70
+38.60
+SW (ours)
+γ = 0.25 + k = 1
+42.06
+SW (ours)
+γ = 0.25 + k = 2
+41.78
+19.77
+38.68
+SW (ours)
+γ = 0.25 + k = 2
+42.74
+SW (ours)
+γ = 0.25 + k = 5
+41.88
+19.82
+38.78
+SW (ours)
+γ = 0.25 + k = 5
+42.87
+SW (ours)
+γ = 0.25 + k = 10
+41.88
+19.84
+38.78
+SW (ours)
+γ = 0.25 + k = 10
+42.83
+OW
+γ = 0.5
+38.60
+16.29
+35.90
+OW
+γ = 0.5
+39.13
+SW (ours)
+γ = 0.5 + k = 1
+41.81
+19.80
+38.70
+SW (ours)
+γ = 0.5 + k = 1
+43.12
+SW (ours)
+γ = 0.5 + k = 2
+41.87
+19.87
+38.79
+SW (ours)
+γ = 0.5 + k = 2
+43.64
+SW (ours)
+γ = 0.5 + k = 5
+41.90
+19.86
+38.80
+SW (ours)
+γ = 0.5 + k = 5
+44.18
+SW (ours)
+γ = 0.5 + k = 10
+41.88
+19.85
+38.80
+SW (ours)
+γ = 0.5 + k = 10
+44.06
+OW
+γ = 0.75
+39.21
+17.37
+36.42
+OW
+γ = 0.75
+41.36
+SW (ours)
+γ = 0.75 + k = 1
+41.88
+19.84
+38.78
+SW (ours)
+γ = 0.75 + k = 1
+46.43
+SW (ours)
+γ = 0.75 + k = 2
+41.90
+19.89
+38.82
+SW (ours)
+γ = 0.75 + k = 2
+46.78
+SW (ours)
+γ = 0.75 + k = 5
+41.91
+19.87
+38.83
+SW (ours)
+γ = 0.75 + k = 5
+46.67
+SW (ours)
+γ = 0.75 + k = 10
+41.89
+19.86
+38.81
+SW (ours)
+γ = 0.75 + k = 10
+46.46
+Table 5: Complete results on the CNN and DART dataset.
+11
+
+Dataset
+model
+method
+γ and k
+ROUGE-1
+ROUGE-2
+ROUGE-L
+Dataset
+model
+method
+γ and k
+BLEU
+XSUM
+BART-base
+NW
+-
+42.36
+19.42
+34.40
+WebNLG
+BART-base
+NW
+-
+54.45
+OW
+γ == 0.25
+37.84
+14.76
+29.89
+OW
+γ == 0.25
+44.46
+SW (ours)
+γ = 0.25+k = 1
+40.09
+16.67
+31.65
+SW (ours)
+γ = 0.25+k = 1
+47.03
+SW (ours)
+γ = 0.25+k = 2
+40.28
+16.95
+31.93
+SW (ours)
+γ = 0.25+k = 2
+48.17
+SW (ours)
+γ = 0.25+k = 5
+40.78
+17.27
+32.36
+SW (ours)
+γ = 0.25+k = 5
+48.53
+SW (ours)
+γ = 0.25+k = 10
+40.81
+17.41
+32.38
+SW (ours)
+γ = 0.25+k = 10
+49.99
+OW
+γ == 0.5
+37.99
+14.66
+29.82
+OW
+γ == 0.5
+43.14
+SW (ours)
+γ = 0.5+k = 1
+40.95
+17.53
+32.56
+SW (ours)
+γ = 0.5+k = 1
+47.48
+SW (ours)
+γ = 0.5+k = 2
+41.00
+17.65
+32.70
+SW (ours)
+γ = 0.5+k = 2
+48.49
+SW (ours)
+γ = 0.5+k = 5
+41.27
+17.82
+32.92
+SW (ours)
+γ = 0.5+k = 5
+49.98
+SW (ours)
+γ = 0.5+k = 10
+41.36
+17.97
+33.03
+SW (ours)
+γ = 0.5+k = 10
+51.25
+OW
+γ == 0.75
+40.07
+16.67
+31.80
+OW
+γ == 0.75
+45.88
+SW (ours)
+γ = 0.75+k = 1
+41.60
+18.26
+33.29
+SW (ours)
+γ = 0.75+k = 1
+50.95
+SW (ours)
+γ = 0.75+k = 2
+41.65
+18.43
+33.42
+SW (ours)
+γ = 0.75+k = 2
+50.50
+SW (ours)
+γ = 0.75+k = 5
+41.82
+18.59
+33.61
+SW (ours)
+γ = 0.75+k = 5
+51.60
+SW (ours)
+γ = 0.75+k = 10
+41.85
+18.61
+33.60
+SW (ours)
+γ = 0.75+k = 10
+53.01
+BART-large
+NW
+-
+45.25
+22.15
+37.03
+BART-large
+NW
+-
+57.18
+OW
+γ == 0.25
+40.13
+16.75
+31.83
+OW
+γ == 0.25
+47.87
+SW (ours)
+γ = 0.25+k = 1
+42.26
+18.63
+33.54
+SW (ours)
+γ = 0.25+k = 1
+49.03
+SW (ours)
+γ = 0.25+k = 2
+42.51
+18.92
+33.90
+SW (ours)
+γ = 0.25+k = 2
+49.14
+SW (ours)
+γ = 0.25+k = 5
+43.01
+19.48
+34.39
+SW (ours)
+γ = 0.25+k = 5
+49.60
+SW (ours)
+γ = 0.25+k = 10
+43.26
+19.68
+34.69
+SW (ours)
+γ = 0.25+k = 10
+51.29
+OW
+γ == 0.5
+40.07
+16.51
+31.49
+OW
+γ == 0.5
+44.58
+SW (ours)
+γ = 0.5+k = 1
+43.25
+19.63
+34.70
+SW (ours)
+γ = 0.5+k = 1
+49.66
+SW (ours)
+γ = 0.5+k = 2
+43.41
+19.82
+34.94
+SW (ours)
+γ = 0.5+k = 2
+50.77
+SW (ours)
+γ = 0.5+k = 5
+43.65
+20.14
+35.18
+SW (ours)
+γ = 0.5+k = 5
+51.50
+SW (ours)
+γ = 0.5+k = 10
+43.83
+20.39
+35.41
+SW (ours)
+γ = 0.5+k = 10
+52.50
+OW
+γ == 0.75
+42.02
+18.43
+33.27
+OW
+γ == 0.75
+47.31
+SW (ours)
+γ = 0.75+k = 1
+44.24
+20.80
+35.82
+SW (ours)
+γ = 0.75+k = 1
+52.59
+SW (ours)
+γ = 0.75+k = 2
+44.27
+20.84
+35.86
+SW (ours)
+γ = 0.75+k = 2
+53.27
+SW (ours)
+γ = 0.75+k = 5
+44.49
+21.05
+36.04
+SW (ours)
+γ = 0.75+k = 5
+54.04
+SW (ours)
+γ = 0.75+k = 10
+44.45
+21.11
+36.10
+SW (ours)
+γ = 0.75+k = 10
+54.45
+Flan-T5-small
+NW
+-
+33.57
+12.00
+26.50
+Flan-T5-small
+NW
+-
+56.41
+OW
+γ == 0.25
+29.53
+8.55
+22.69
+OW
+γ == 0.25
+37.93
+SW (ours)
+γ = 0.25+k = 1
+32.35
+10.68
+25.26
+SW (ours)
+γ = 0.25+k = 1
+48.45
+SW (ours)
+γ = 0.25+k = 2
+32.63
+10.91
+25.4
+SW (ours)
+γ = 0.25+k = 2
+49.47
+SW (ours)
+γ = 0.25+k = 5
+32.61
+10.99
+25.55
+SW (ours)
+γ = 0.25+k = 5
+49.73
+SW (ours)
+γ = 0.25+k = 10
+32.73
+11.08
+25.67
+SW (ours)
+γ = 0.25+k = 10
+50.03
+OW
+γ == 0.5
+30.51
+9.13
+23.53
+OW
+γ == 0.5
+40.88
+SW (ours)
+γ = 0.5+k = 1
+32.80
+11.08
+25.74
+SW (ours)
+γ = 0.5+k = 1
+50.05
+SW (ours)
+γ = 0.5+k = 2
+33.00
+11.26
+25.92
+SW (ours)
+γ = 0.5+k = 2
+51.30
+SW (ours)
+γ = 0.5+k = 5
+33.12
+11.40
+25.98
+SW (ours)
+γ = 0.5+k = 5
+51.65
+SW (ours)
+γ = 0.5+k = 10
+33.15
+11.39
+26.01
+SW (ours)
+γ = 0.5+k = 10
+52.16
+OW
+γ == 0.75
+31.86
+10.24
+24.91
+OW
+γ == 0.75
+47.19
+SW (ours)
+γ = 0.75+k = 1
+33.30
+11.53
+26.27
+SW (ours)
+γ = 0.75+k = 1
+52.84
+SW (ours)
+γ = 0.75+k = 2
+33.36
+11.60
+26.27
+SW (ours)
+γ = 0.75+k = 2
+53.85
+SW (ours)
+γ = 0.75+k = 5
+33.46
+11.68
+26.32
+SW (ours)
+γ = 0.75+k = 5
+54.23
+SW (ours)
+γ = 0.75+k = 10
+33.30
+11.60
+26.21
+SW (ours)
+γ = 0.75+k = 10
+54.29
+Flan-T5-base
+NW
+-
+39.51
+16.92
+31.89
+Flan-T5-base
+NW
+-
+59.77
+OW
+γ == 0.25
+34.47
+12.00
+26.94
+OW
+γ == 0.25
+41.83
+SW (ours)
+γ = 0.25+k = 1
+37.66
+14.92
+29.91
+SW (ours)
+γ = 0.25+k = 1
+51.56
+SW (ours)
+γ = 0.25+k = 2
+37.85
+15.06
+30.12
+SW (ours)
+γ = 0.25+k = 2
+51.53
+SW (ours)
+γ = 0.25+k = 5
+38.23
+15.40
+30.55
+SW (ours)
+γ = 0.25+k = 5
+52.15
+SW (ours)
+γ = 0.25+k = 10
+38.24
+15.45
+30.53
+SW (ours)
+γ = 0.25+k = 10
+51.99
+OW
+γ == 0.5
+35.23
+12.57
+27.52
+OW
+γ == 0.5
+45.42
+SW (ours)
+γ = 0.5+k = 1
+38.34
+15.45
+30.66
+SW (ours)
+γ = 0.5+k = 1
+51.98
+SW (ours)
+γ = 0.5+k = 2
+38.49
+15.72
+30.82
+SW (ours)
+γ = 0.5+k = 2
+52.38
+SW (ours)
+γ = 0.5+k = 5
+38.79
+15.91
+31.02
+SW (ours)
+γ = 0.5+k = 5
+52.89
+SW (ours)
+γ = 0.5+k = 10
+38.67
+15.89
+31.01
+SW (ours)
+γ = 0.5+k = 10
+53.27
+OW
+γ == 0.75
+36.98
+14.13
+29.34
+OW
+γ == 0.75
+50.39
+SW (ours)
+γ = 0.75+k = 1
+38.92
+16.15
+31.26
+SW (ours)
+γ = 0.75+k = 1
+55.19
+SW (ours)
+γ = 0.75+k = 2
+39.00
+16.31
+31.38
+SW (ours)
+γ = 0.75+k = 2
+55.28
+SW (ours)
+γ = 0.75+k = 5
+39.13
+16.35
+31.47
+SW (ours)
+γ = 0.75+k = 5
+55.82
+SW (ours)
+γ = 0.75+k = 10
+39.03
+16.34
+31.44
+SW (ours)
+γ = 0.75+k = 10
+55.47
+Table 6: Complete results on the XSUM and WebNLG datasets.
+12

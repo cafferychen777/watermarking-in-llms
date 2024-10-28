@@ -1,0 +1,2304 @@
+MARKMYWORDS: Analyzing and Evaluating
+Language Model Watermarks
+Julien Piet
+UC Berkeley
+Chawin Sitawarin
+UC Berkeley
+Vivian Fang
+UC Berkeley
+Norman Mu
+UC Berkeley
+David Wagner
+UC Berkeley
+Abstract—The capabilities of large language models have grown
+significantly in recent years and so too have concerns about
+their misuse. It is important to be able to distinguish machine-
+generated text from human-authored content. Prior works have
+proposed numerous schemes to watermark text, which would
+benefit from a systematic evaluation framework. This work
+focuses on LLM output watermarking techniques—as opposed to
+image or model watermarks—and proposes MARKMYWORDS,
+a comprehensive benchmark for them under different natural
+language tasks. We focus on three main metrics: quality, size
+(i.e., the number of tokens needed to detect a watermark), and
+tamper resistance (i.e., the ability to detect a watermark after
+perturbing marked text). Current watermarking techniques are
+nearly practical enough for real-world use: Kirchenbauer et al.
+[33]’s scheme can watermark models like Llama 2 7B-chat or
+Mistral-7B-Instruct with no perceivable loss in quality on natural
+language tasks, the watermark can be detected with fewer than
+100 tokens, and their scheme offers good tamper resistance
+to simple perturbations. However, they struggle to efficiently
+watermark code generations. We publicly release our benchmark
+(https://github.com/wagner-group/MarkMyWords).
+I. INTRODUCTION
+Recent advancements in large language models (LLMs)
+have been paralleled by escalating concerns over their misuse:
+automating social engineering attacks [42], scaling propaganda
+operations [17], and more [6, 52, 60, 68, 73].
+One approach to mitigate these risks is watermarking, in
+which a subtle signal is embedded in all outputs from the
+model, so that others can detect LLM-generated text. To date,
+the most popular LLM watermarking techniques are symmetric-
+key based, meaning a key is needed to encode the watermark
+into the LLM outputs and verify its presence. Multiple LLM
+output watermarking schemes have been proposed [1, 8, 33, 37]
+and subsequently analyzed [5, 30, 36, 59], but the feasibility
+of watermarking LLM outputs in practice remains unclear.
+Some researchers argue that watermarks can be practical [36],
+while others argue the opposite [30, 59]. There has yet to be
+consensus on evaluating different watermarking schemes or
+their readiness for practical deployment.
+Our work tackles this challenge by providing a common
+ground where these algorithms can be empirically evaluated.
+We propose MARKMYWORDS, an open-sourced benchmark to
+evaluate symmetric key watermarking schemes for under eleven
+tasks — three realistic natural language tasks representing
+possible misuses for selecting optimal watermarking parame-
+ters (book summarization, creative writing, and news article
+0Number of tokens needed to detect the watermark at a p-value of 0.02, as
+defined in Section IV.
+Fig. 1: Watermark size1 at near-optimal quality for four
+watermarking schemes (using Llama 2 7B-chat at various
+sampling temperatures). The distribution-shift scheme [33]
+outperforms others at low temperatures, only needing a median
+of 60 tokens for the watermark to be detected.
+generation) and eight additional validation tasks to evaluate
+watermarks in various settings. We devise metrics to measure
+efficiency (number of tokens needed to detect a watermark),
+quality (whether the watermark degrades utility), and tamper
+resistance. To measure tamper resistance, MARKMYWORDS
+tests whether a number of simple perturbations can subvert the
+watermark without loss in quality.
+We combine previous symmetric-key watermarking schemes
+into a unified framework, allowing practitioners to build custom
+schemes using building blocks from different prior work. We
+ran MARKMYWORDS on all practical parameter combinations
+and came to the following conclusions:
+(1) Watermarking schemes are nearing practicality for real-
+world use (Section V-A). The outputs of Llama 2 [65] and
+Mistral [29] can be watermarked with minimal quality loss
+for natural language tasks while detecting the watermark
+in under 100 tokens (Fig. 1). However, optimal watermarks
+for natural language struggle to watermark code generation,
+incurring noticeable quality loss.
+(2) Watermarks with optimal parameters are relatively robust
+to simple perturbations. Although more sophisticated
+attacks are capable of removing any watermark, GPT-3.5
+paraphrasing only removes 50% of the watermarks from
+the best scheme (Section V-C).
+(3) We challenge the necessity of indistinguishability in natural
+language watermarking schemes, i.e., the distribution of
+watermarked outputs be provably indistinguishable from
+arXiv:2312.00273v3  [cs.CR]  11 Oct 2024
+
+Output token
+distribution
+LLM
+Selection procedure
+Randomness 𝐑
+the
+Hi 
+a
+yes
+an
+sorry
+Obama
+Verification procedure
+Potential attacker trying 
+to remove watermark
+Hi! How 
+may I 
+help you?
+Howdy!
+How may I 
+assist you?
+Watermarked text
+Modified text
+𝑧!
+𝑧"
+𝑧#
+𝑧$
+𝑧%
+𝑧&
+Per-token 
+statistics 
+Sampling
+Algorithm 𝐂
+Score 𝐒
+“This text is 
+generated by…”
+LLM
+Human
+Fig. 2: An overview of LLM-output watermarking.
+non-watermarked outputs (Section VI-A). Our results
+show Kirchenbauer et al. [33] to be the easiest-to-detect
+watermark while maintaining quality, despite not being
+indistinguishable.
+The remainder of this paper is structured as follows. First,
+we provide some background on watermarking in Section II.
+We provide details about our benchmark in Section III, and
+introduce our metrics used to evaluate watermarks in Section IV.
+We present our findings in Section V, and discuss implications
+and limitations of our work in Section VI. Finally, we provide
+an in-depth analysis of existing watermarking schemes and
+map out the design space in Section VII.
+II. BACKGROUND
+In this paper, we consider symmetric-key watermarking
+schemes that can be applied to existing pretrained language
+models. They watermark the model’s outputs, not the model’s
+weights. These schemes are the most convenient and practical
+as they can be added to any generative language model without
+requiring fine-tuning. We provide here a high-level overview
+of the schemes.
+A. Related work
+Watermarking can refer to either watermarking models, or
+watermarking model outputs. Watermarking models [9, 19, 20,
+79] defends against model extraction attacks and is out of scope
+of our work; we focus on watermarking model outputs in order
+to detect AI-generated text. Watermarking of textual data has
+been extensively studied [26, 32, 58, 63]. It can be viewed as
+a form of steganography [10, 47, 81] with a one-bit message.
+The message can be embedded post-generation (rule-based
+and neural-based watermarking), or during generation [64].
+We consider the latter. Watermarks could conceivably also
+be used to prove that text was indeed machine-generated, for
+instance, to guarantee the provenance of a generation, similar
+to copyrights. That setting is out of scope for this paper.
+Another approach to detecting AI-generated text is to train a
+classifier on LLM outputs [4, 11, 16, 28, 50, 51, 53, 56, 67, 76].
+This approach avoids the need to modify how text is generated
+by the LLM, but must be updated whenever the LLM changes.
+For proprietary LLMs, an alternative is for the vendor to keep
+a copy of all generated outputs from their LLM and provide
+an API to look up whether a text was previously produced
+with their LLM [36].
+LLM benchmarks. New LLMs are accompanied by corre-
+sponding benchmarks designed to quantify their advancements
+over predecessors. While some benchmarks focus on assessing
+LLMs across a range of tasks—such as MMLU [22], BIG-
+Bench [75], and HELM [41]—others are tailored to evalu-
+ate specific capabilities like programming [3] or multi-turn
+conversation [80]. In contrast to these existing benchmarks,
+MARKMYWORDS is the first to evaluate watermarks in LLM
+outputs across multiple dimensions: quality, efficacy, and
+tamper resistance. WaterBench [66], a concurrent benchmark,
+evaluates one class of watermarks [33], and does not evaluate
+tamper resistance. Furthermore, MarkMyWords better captures
+the ability of watermarking schemes to preserve quality.
+WaterBench selects hyperparameters that lead to detectable
+watermarks in generations of under 10 tokens, which in our ex-
+perience is not a reasonable goal. The only way to achieve this
+is by significantly harming quality. We believe our approach—
+choosing parameters so that quality is preserved and then
+measuring how long outputs must be for the watermark to be
+detectable—is more realistic and informative. MarkLLM [54] is
+another concurrent watermarking framework focused on imple-
+menting and visualizing watermarking schemes. It provides a
+set of evaluation tools that tests each watermark using only one
+configuration of hyperparameters provided by the user. Instead,
+we evaluate hundreds of hyperparameter configurations and
+identify optimal trade-offs, as to fairly compare watermarking
+schemes and highlight the best performing one.
+B. Definitions
+A (digital) watermark is a pattern embedded in a signal
+(image, text, audio, etc.) for identifying the source of the signal.
+For generative language models, watermarks are useful to
+detect machine-generated text, in contexts where using language
+models could be unethical, like phishing emails, fake news, or
+college essays. These settings would benefit from a watermark
+that is not trivial for an unsophisticated adversary to remove.
+Watermarking algorithms consist of a marking procedure
+W and a verification procedure V. At generation time, each
+new token invokes the W to embed a watermark into the
+generated output. W has access to a secret key k, the previous
+tokens T0, · · · , Tn−1, and the language model’s distribution
+p(Tn | T0, . . . , Tn−1) on the next token, and selects a next
+token Tn. V takes as input a secret key and a piece of text,
+
+Randomness Source
+Description
+Parameter
+text-
+dependent
+sliding window
+Keyed hash of sliding window of past tokens
+window size
+min hash
+Minimum of keyed hash applied to each previous token in sliding window
+fixed
+Expands secret key to pseudorandom sequence
+key length
+TABLE I: Randomness sources.
+and returns True if the text was generated using marking
+procedure W.
+C. Evaluated watermarks
+We focus on symmetric-key watermarking algorithms. To
+our knowledge, the only asymmetric key scheme was proposed
+by Fairoze et al. [12]. Existing watermarking schemes can
+be categorized by their source of randomness and sampling
+strategy for the next token. Randomness sources can be
+combined with any sampling strategy. There are 3 randomness
+sources used by prior work (Table I), each using a keyed hash
+function. Text-dependent randomness sources rely on a fixed-
+size window of previous tokens. Fixed randomness depends
+only on the secret key. We identify 4 sampling strategies across
+prior work:
+Exponential. Aaronson and Kirchner [1] mark text by selecting
+a token Tn that maximizes a score that depends on the
+probability p(Tn|T0···n−1) and on a pseudorandom value
+fk(Tn−H···n−1) derived from a sliding window of H prior
+tokens.
+Distribution-shift. Kirchenbauer et al. [33] mark text by
+favoring tokens from a green list. Green lists are derived
+from a pseudorandom value (computed either as fk(Tn−1)
+or a min hash over a sliding window of H prior tokens,
+min(fk(Tn−H), . . . , fk(Tn−1))). Tokens in the green list are
+favored by adding a small bias δ to their logits.2
+Binary. Christ et al. [8] convert the tokens to bit-strings. Each
+random bit is chosen based on a pseudorandom value (we use
+fk(Tn−H···n−1), derived from the LLM-induced distribution
+on bits). Finally, the bit-string is converted to a sequence of
+tokens.
+Inverse transform. Kuditipudi et al. [37] computes the
+CDF F(t) = Pt
+Tn=0 p(Tn|T0···n−1) of the LLM’s output
+distribution (permuted according to a secret key k); then a
+fixed pseudorandom value fk(n) is used to sample from this
+distribution, via the inverse transform F −1(fk(n)).
+These strategies are also used by other works: [21, 39, 40,
+43, 44, 46, 62, 74, 78] are based on distribution shift, and [27]
+uses inverse transforms. For the deterministic schemes above
+(all but distribution shift), we also experiment with adding
+more diversity in generated outputs by randomly skipping
+watermarking for some tokens with a given probability, the
+skip probability. We provide a full taxonomy unifying existing
+watermarking schemes in Section VII.
+Verification algorithms rely on the likelihood of a score
+S under the hypothesis that the text was not watermarked.
+2The green list size is denoted by γ [33]. We set γ = 0.5, and find other
+values of γ degrade all metrics.
+Watermarked text is flagged as AI-generated if the likelihood
+is below a p-value threshold. We also provide more details on
+verification algorithms in Section VII-E.
+III. MARKMYWORDS
+We now present MARKMYWORDS, our benchmark for
+evaluating watermarking schemes. MARKMYWORDS focuses
+on natural language and relies on three text generation tasks,
+each comprised of about 100 examples. They were chosen
+to generate long text, in order to ensure enough tokens to
+watermark most outputs and obtain a good size estimate (the
+number of tokens needed to detect a watermark, as defined
+in Section IV-B). They represent scenarios in which LLM could
+be abused and thus in which watermarking would be useful.
+(1) Book reports. Generate a report of a well-known book.
+(100 tasks)
+(2) Story generation. Generate a short story, with a specific
+tone (e.g., funny, sad, suspenseful) and topic (e.g., “three
+strangers that win a getaway vacation”). (96 tasks)
+(3) Fake news. Generate a news story about two political
+figures meeting at an event. (100 tasks)
+Our benchmark generates a total of 296 outputs from
+the language model, with a maximum of 1024 tokens per
+generation. We watermark the outputs of each task and measure
+quality and watermark size. We then perturb the generations
+to measure tamper resistance. We only attack the first third
+of each task to keep the benchmark runtime reasonable. On
+an A5000 GPU, the benchmark completes within 40 minutes
+for one combination of a watermarking scheme and parameter
+setting. Full task prompts are given in Section A.
+Validation tasks. In addition to the three main tasks, we
+validate watermarks on eight additional tasks for a more holistic
+evaluation.
+(V1) Domain-specific tasks. Generate RFC3 summaries and
+legal research tasks. (50 tasks each)
+(V2) Multilingual capabilities. Generate book reports in
+French. (100 tasks)
+(V3) Low entropy tasks. Paraphrase and translate book
+reports. (100 tasks each)
+(V4) Code generation. Solve coding problems from the APPS
+dataset [22]. (300 tasks)
+(V5) Short summarization. Generate three sentence news
+highlights from the CNN/DailyMail dataset [24, 61]. (100
+tasks)
+(V6) Multiple choice. Answer MMLU [23] questions. (2000
+tasks)
+3Requests For Comments (RFCs) are documents providing specifications
+for internet protocols.
+
+Perturbation Type
+Description
+Swap
+Randomly remove, add, and swap p% of the words in each sentence.
+Synonym
+Replace p% of words in sentences with synonyms.
+Paraphrase
+Use another LLM to paraphrase the output.
+Translation
+Translate the output to another language and back to English.
+Contraction & Expansion
+Contract or expand verbs.
+Lowercase
+Transform the output to all lowercase.
+Misspelling & Typo
+Add p% of typos or common misspellings.
+TABLE II: Perturbations on watermarks included in MARKMYWORDS.
+A. Perturbations on watermarks
+Good watermarking schemes should easily detect the mark if
+an LLM’s watermarked output is used directly. Better schemes
+should also detect the mark even when the output is slightly
+modified. Sufficiently sophisticated strategies can bypass any
+watermarking scheme [77], but in many practical settings, this
+can be more effort than it’s worth for the attacker: a cheating
+student trying to save time won’t be inclined to carry out
+technically sophisticated attacks. Therefore, we evaluate the
+watermarks against simple perturbations aimed at removing
+the mark from AI-generated text. A perturbation of generated
+text x is some text xadv that is semantically similar to x, but
+can be syntactically different. We summarize the attacks we
+use to provide a holistic evaluation of a watermark’s tamper
+resistance in Table II and provide more details below.
+Swap attack. One natural attack is to randomly remove, add,
+and swap some words in each sentence. We scan generated text
+word by word, and with probability p, we either remove the
+word, duplicate it, or swap it with another randomly chosen
+word in the sentence. Swap attacks are easy to implement for
+an attacker, and for small values of p produce text that is still
+understandable.
+Synonym attack. This attack replaces words in sentences with
+synonyms. With probability p, we replace each word in the
+text by a semantically equivalent word. This attack is more
+difficult to implement for an attacker. We automate this attack
+using WordNet [49] to zero-shot prompt GPT-3.5 to generate
+candidate synonyms. In practice, this approach sometimes cre-
+ates grammatically incorrect or unnatural sentences. However,
+for a low probability p, the output text is still semantically
+close to the original.
+Paraphrase attack. Perhaps the strongest attack in our toolkit,
+the paraphrase attack involves using another language model
+to rephrase the generated text. This can be difficult and
+expensive to implement for an attacker, as they need access to
+a high-quality non-watermarked language model to do so, but
+the attack can completely change text without perturbing its
+meaning. We implement two versions: (1) zero-shot prompting
+GPT-3.5 to paraphrase a generation, and (2) Dipper [36], a
+fine-tuned model designed for paraphrasing.
+Translation attack. This is similar to the paraphrase attack,
+except we use a translation model (argos-translate [15]
+based on OpenNMT [34]) to translate text through a cycle of
+languages (e.g., English →French →English). This attack
+does not alter the text as much as the paraphrase attack, but it is
+easy for an attacker to implement since they can use available
+services like Google Translate. We use two languages, French
+and Russian, as variants of this attack.
+HELM perturbations. HELM [41] implements a number of
+perturbations in its source code. They were originally designed
+to perturb model prompts. We use them to perturb model
+outputs. Among the list of perturbations they implement, we
+chose those that do not change the overall meaning of the text.
+In particular, we use contractions & expansions attacks, which
+contract verbs (e.g. “do not” →“don’t”) or expand them, lower
+case attacks, which convert all words to lower case, misspelling
+attacks, which misspell each word with probability p, and typo
+attacks.
+B. Out-of-scope attacks
+We evaluate the tamper resistance of schemes to simple
+perturbations. We do not measure their robustness against
+stronger attackers and do not consider the following attack
+vectors:
+Prompt modifications. Some attacks modify the prompt to
+the model to avoid watermarking. For example, in the “emoji
+attack” the attacker instructs the model to insert an emoji
+between each word of the output, then replaces the emojis with
+spaces [33]. This attack defeats all watermarking schemes using
+text-dependent randomness. Prompt-modification strategies
+only work with models that can comprehend complex prompts,
+and can possibly be mitigated using advanced prompt filtering.
+Spoofing attacks. We do not consider attacks that spoof
+watermarks [18, 31] as the setting of proving provenance is
+out of scope for this paper. Spoofing attacks can also enhance
+paraphrase attacks, but have a high one-time cost (e.g., 10,000s
+of generations) and can be mitigated by rotating the key k.
+Adaptive attacks. We do not consider attacks that use the
+watermarking detection procedure V as an oracle. Mitigations
+include keeping the key k secret, rate-limiting calls to V,
+designing the verification API to release only “watermarked”
+or “not” (and not the score S or its likelihood), and detecting
+clusters of closely-related calls to the verification API.
+C. Implementation
+We implemented the MARKMYWORDS benchmark in
+Python using the transformers library [72] to implement
+models and watermarks. Our code has been made public4. It
+4https://github.com/wagner-group/MarkMyWords
+
+supports any language model available on HuggingFace and
+allows passing custom watermarking schemes for evaluating
+new solutions. We designed MARKMYWORDS with the goal of
+making future proposals of watermark schemes straightforward
+to evaluate.
+Efficiency In order to speed up computation, we wrote custom
+implementations directly in CUDA of some of the watermarking
+schemes:
+• Hash function. The exponential sampling scheme relies
+on computing the hash of many elements. Our CUDA
+implementation allows this to be done in parallel.
+• Edit distance. The edit distance is computed with every
+possible key offset; our code implements this in parallel.
+Reproducibility Our benchmark is packaged as a Python
+module, includes all necessary data, and can be installed easily
+by following the README.md file. Running the benchmark
+requires vLLM-compatible GPUs [38]. The benchmark will pro-
+duce deterministic results (quality, size and tamper-resistance)
+for a given randomness seed and watermarking secret key: only
+external components such as GPT paraphrasing are not fully
+deterministic, and are not part of the core benchmark.
+IV. EVALUATION METRICS
+We propose three metrics for evaluating watermarking
+schemes: (1) quality, (2) watermark size, and (3) tamper resis-
+tance. We also propose an aggregate metric that summarizes
+the performance of a watermarking scheme in a single number.
+A. Quality
+MARKMYWORDS relies on a suite of tasks tailored for
+language models. Due to the scaling difficulties of human
+evaluation, we opt for automated ratings via LLM-as-a-
+Judge [7, 35, 45, 69, 80], despite potential biases such as
+preference for verbose answers and self-generated content [70].
+Following Zheng et al. [80], we mitigate these drawbacks
+by listing essential grading factors in the rating prompt
+(helpfulness, relevance, accuracy, depth, creativity, and level
+of detail) and using a different LLM for generation and rating.
+We provide the rating prompt in Section A. Our quality metric
+Q is the average rating over all generations in the benchmark.
+We use Llama 3 (8B Instruct) [48] with greedy decoding as
+the judge LLM, for consistency and reproducibility. Zheng et al.
+[80] shows that GPT-4 and GPT-3.5 produce ratings aligned
+with human preferences, and we found a high correlation
+(R2 > 0.9 on our benchmark) between Llama 2 and GPT-
+3.5-Turbo or GPT-4-Turbo with our prompt. We also found a
+high correlation between ratings from GPT-3.5-Turbo with our
+prompt versus GPT-3.5-Turbo with Zheng et al. [80]’s prompt.
+We only use our quality metric to compare the relative
+quality of watermarked versus non-watermarked benchmarks.
+Its absolute value is not meaningful. We explored but ultimately
+dismissed model perplexity as a quality metric due to its
+preference for repetitive text [25, 71].
+MARKMYWORDS also uses the MAUVE score [57] as a sec-
+ondary quality metric. MAUVE measures the distance between
+watermarked and non-watermarked distributions. Because of
+Fig. 3: Example tamper resistance plot. Blue points are attacks
+on the convex hull’s frontier. The blue area represents the AUC
+and the dashed lines the best attack preserving 80% quality.
+MAUVE’s high variance on small datasets5, we only use it to
+validate the results obtained using our main quality metric.
+B. Watermark size
+The longer the text, the easier it is to watermark and detect
+the watermark, as there are more degrees of freedom to inject
+a mark. Therefore, a critical metric is: how long must the
+generated text be, so that we are likely to be able to detect the
+watermark in it?
+The verification algorithm can make two types of errors:
+false positives (when an unwatermarked text is detected) and
+false negatives (when a watermarked text is not detected). All
+schemes we consider rely on one-tailed statistical tests, so we
+can precisely control the false positive rate (by setting the
+p-value threshold). We define the watermark size, E, to be
+the number of tokens needed to detect the watermark,
+at a 2% false positive rate. We measure it by finding the
+shortest prefix detected as marked on each output (+∞if
+no prefix is detected) and then computing the median of the
+lengths. Smaller values of E indicate better, more efficient
+watermarking schemes.
+C. Tamper resistance
+We assess the robustness of watermarking schemes against 8
+basic tampering attacks outlined in Section III-A. Each attack’s
+impact is quantified by measuring both the quality retention
+(QA, indicating the extent to which an attack degrades the
+output quality) and the detection rate (WA, reflecting the
+percentage of generations still watermarked after perturbation6).
+We define QA := max(0, min(Q∗
+A/Q, 1)), the clipped ratio
+of the mean quality of attacked outputs Q∗
+A to that of the
+baseline. Experimentally, all attacks except the “contraction”
+attack substantially modify the output and reduce quality.
+Contraction attacks may leave outputs unchanged, sometimes
+exhibiting quality up to 1% higher than the baseline due to
+variance.
+We can visualize attacks by plotting their quality retention
+vs. detection efficiency (Fig. 3). The closer a point is to (1, 0),
+5MAUVE works best on distributions with ≥5000 samples.
+6We use this instead of the watermark size because many attacks remove the
+watermark from over 50% of generated texts, in which case all these attacks
+would have a size of +∞.
+
+Fig. 4: Watermark size at near-optimal MAUVE quality for
+each watermarking schemes taken from the literature, using
+Llama 2 7B-chat at various sampling temperatures.
+the more successful the attack. (1, 1) corresponds to no attack,
+and (0, 0) is a trivial attack that returns an empty string. We
+define the tamper resistance of a watermark as the area under
+the curve (AUC) derived from the convex hull, representing the
+attacks with the best possible trade-off between retained quality
+and effectiveness. Any point on the hull’s frontier is attainable
+(on average) by sampling between the two closest attacks on
+the hull. A value of 0 means a tamperable scheme, and a value
+of 0.5 is the highest achievable tamper-resistance. We define R
+as twice the AUC, so R is normalized to be between 0 and 1.
+This metric has a similar intuition to the area under the curve
+measured in ROC curves in binary classification [13].
+We exclude paraphrasing attacks when computing R, because
+they rely on large or closed-sourced language models, which
+can be difficult to obtain, require expensive resources to run,
+or can be watermarked themselves. We do include translations,
+as they rely on smaller models and are freely accessible online.
+We evaluate paraphrasing attacks in Section V-C.
+We found R to be correlated to the success rate of different
+attacks (see
+Fig. 11 in Section B). We found that R = 1
+corresponds to < 20% success rate for the Russian translation
+attack and < 70% for the GPT paraphrase attack.
+D. Aggregate metric
+Different settings of a watermark’s parameters (Section V-B)
+result in different metrics. In order to compare two watermark-
+ing schemes overall, we propose an aggregate metric. We first
+set the watermark’s parameters to be optimal with respect to
+watermark size on a training set while achieving a target quality
+and tamper resistance. The aggregate metric is this watermark’s
+size when run with different random seeds and secret keys, to
+avoid selection bias.
+Fig. 1 reports this aggregate metric for all four schemes,
+with a target quality degradation of ≤1% and target tamper
+resistance of > 0.2. Fig. 7 and Table V present results for other
+thresholds (optimizing for size vs. tamper resistance, ≤1% vs.
+≤10% quality degradation, > 0.2 vs. > 0 tamper resistance).
+Fig. 5: Watermark size at near-optimal quality for text-
+dependent versus fixed randomness. The values correspond
+to the minimal size of schemes with near-optimal quality. Text-
+dependent randomness is more efficient at all temperatures.
+V. RESULTS
+We evaluated more than 1,200 unique combinations of
+watermark schemes and parameter settings. This took ∼1
+week to run on 4 A5000 GPUs. Our results suggest using a
+distribution-shift sampling strategy with text-dependent random-
+ness (Section V-A). We give some parameter recommendations
+in Section V-B, and evaluate tamper resistance in Section V-C.
+A. The “best” watermark
+In Fig. 1, we show the minimal watermark size (median
+number of tokens needed to detect a watermark, at 2%
+false positive rate) under various temperatures, for a quality
+degradation of at most 1% and achieving tamper resistance of
+at least R > 0.2. The distribution shift scheme performs the
+best in the 0.0–0.7 temperature range, which is arguably the
+most common range of temperature values used in practice.7
+At temperature 1, exponential sampling is slightly superior
+to distribution shift. The relative ranking of watermarking
+schemes is consistent across different choices of quality, tamper
+resistance threshold, and quality metric (MAUVE vs. Llama
+3 ratings), as shown in Fig. 4, an analogue of Fig. 1 using
+MAUVE as a quality metric. We define near-optimal quality
+to be a MAUVE similarity within 2.5% of the baseline, as
+stricter bounds are not meaningful since the empirical standard
+deviation of MAUVE scores on our dataset is 1.3%.
+Ready to deploy? The distribution shift scheme is able to
+detect watermarks with ∼50–60 tokens (roughly 40 words),
+at temperatures in the range 0.0–0.7. This suggests that the
+distribution shift watermarking scheme is practical enough to
+be deployed today for natural language generations.
+Validation tasks. Performance on domain-specific tasks as well
+as multilingual tasks (V1 and V2) is nearly identical to the three
+main tasks, as shown in Fig. 15, while preserving quality. The
+same watermarks achieve good quality on the paraphrasing and
+translation tasks (V3). Watermark size increases by a factor of
+2 to 3 due to the lower entropy. Distribution shift watermarks
+can still be detected in under 100 tokens for T ≤0.7, and in
+7For example, GPT-4’s technical report uses a temperature of 0.6 [2].
+
+Fig. 6: Size versus quality of all parameter settings at T=1.
+The darker the color, the more tamper-resistant. Distribution
+shift is the most tunable scheme.
+250 tokens at T = 1. More details can be found in Fig. 17.
+Short summaries (V5) and Q&A responses (V6) are too short
+for watermarks to be detected. We focused on evaluating the
+quality of the generations. Watermarking preserved the quality
+of the short summaries, but decreased quality of both Q&A
+responses and code generations (V4).
+Structured outputs. Watermarks struggle to preserve the
+quality of structured outputs, like code generation or mul-
+tiple choice answers. The optimal watermarks from Fig. 1
+decrease the quality of responses to coding tasks (V4). At a
+temperature of T = 1, using Llama-3-8B-Instruct [48]8, non-
+watermarked generations pass 17.5% of the APPS test suite,
+while distribution shift scheme generations pass 11%, and
+exponential scheme generations pass 11.5% (Fig. 18). Code
+generations have lower entropy and are shorter than the natural
+language generations in our benchmark. The distribution-shift
+scheme only identifies 40% of generations while the exponential
+scheme identifies 58%, with a watermark size of 200. We
+observe a similar phenomenon on MMLU answers (V6), where
+the distribution shift parameters from Fig. 1 make 5-10%
+more mistakes than the baseline for Llama2 and 2-7% for
+Mistral. However, other schemes were able to perform MMLU
+tasks with no decrease in accuracy. We plot the correctness of
+watermarked Q&A answers in Section B (Fig. 16).
+Parameter settings. Fig. 1 uses the following parameters: for
+distribution-shift, text-dependent randomness with min hash
+of size 3 (T = 0.7), sliding window of size 1 (T ̸= 0.7),
+δ = 5 (T ≤0.7), and δ = 2.5 (T = 1); for the exponential
+scheme, sliding window size 3, and skip probability 0.05. These
+achieve our goals of R > 0.2 tamper resistance and ≤1%
+quality degradation.
+Randomness source. Text-dependent randomness is more
+efficient than fixed randomness. Fixed randomness requires
+between 20 to 200 additional tokens for detection, depending
+on the sampling temperature, as seen in Fig. 5, in which we
+8Llama2 and Mistral did not perform well on this task.
+Parameter
+Win
+Size
+Min
+Hash
+Skip
+Prob
+Bias
+Key
+Len
+Quality
++
+⊥
++
+-
++
+Size
++
++
++
+-
++
+Tamper
+Resistance
+-
++
+⊥
++
+-
+Suggestion
+1-3
+False
+0.05
+≥2
+4
+TABLE III: Correlations between parameters and metrics. “+”
+indicates a positive correlation, “-” a negative correlation, “⊥”
+no correlation. Symbols in red indicate a strong effect of the
+parameter on the given metric.
+report the smallest size result across all four schemes for fixed
+randomness (in blue) versus text-dependent randomness (in
+orange). For text-dependent randomness, we report the smallest
+size between sliding window and min hash.9
+Mistral. The distribution-shift scheme is still superior when
+using Mistral-7B-Instruct [29]. Mistral can be watermarked
+in 75 tokens or less, regardless of temperature. A version of
+Fig. 1 using Mistral is in Section B (Fig. 12).
+Tunability. We plot all quality/size/tamper resistance tradeoffs
+attainable, at a fixed temperature (T = 1), in Fig. 6. Each
+data point represents a combination of a watermarking scheme
+and a parameter setting. Distribution-shift is the most tunable
+scheme: by adjusting the bias parameter, one can sacrifice
+quality for watermark size, something that is not possible for
+other watermarks. The exponential scheme shows significant
+spread in quality because some parameter settings do not
+provide enough entropy (e.g., setting the sliding window too
+small). Below, we describe how these schemes can be tuned.
+B. Parameter tuning
+Table III summarizes the effects of each parameter on the
+metrics. The distribution-shift scheme is the most tunable:
+the bias δ allows to adjust the quality to watermarking size
+trade-off. We plot all quality/size/tamper resistance tradeoffs
+attainable, at a fixed temperature (T = 1), in Fig. 6.
+Window size. Increasing the window size increases quality,
+but also increases the watermark size and decreases robustness.
+We recommend using a window size of 1 to 3; larger window
+sizes do not further improve quality.
+Min hash. At a window size of 3, the min hash increases
+both tamper resistance and size by 33%, compared to a sliding
+window. We recommend using a simple sliding window.
+Skip probability. We recommending setting the skip probabil-
+ity at 0.05 for indistinguishable schemes (exponential, binary,
+inverse transform) using text-dependent randomness, as this
+adds non determinism to their outputs. This also provides
+slightly better quality than a skip probability of 0.
+9We exclude text-dependent randomness with a window size of 0 or fixed
+randomness with a key length of 1 from the analysis, since these corner cases
+are identical and correspond to always using the same random value.
+
+Fig. 7: Attack efficacy against top two schemes (with param-
+eters from Fig. 1). The watermark size E is labeled on each
+point.
+Bias. For distribution-shift, the bias (δ) is a critical parameter
+that has a large impact on quality, size, and tamper resistance.
+Fig. 13 visualizes its impact. We suggest choosing δ based on
+the most common temperature that the model is likely to be
+used with. In all cases, only values of δ ≥2 yield efficient
+schemes.
+Green list size. Our early experiments showed that changing
+the green list size (γ) from 0.5 only negatively impacts the
+watermark in all three metrics. Therefore we fixed γ to 0.5 for
+our experiments and suggest practitioners do the same.
+Fixed randomness. We recommend using a key length L of 4.
+Smaller values are detrimental to quality, but for L ≥4 quality
+remains mostly the same, while larger values are worse for
+tamper resistance and size (Fig. 14).
+C. Tamper resistance
+Attack strength. We analyze the tamper resistance of schemes
+with the optimal parameters from Fig. 1, evaluating the success
+rate of each individual perturbation. Fig. 8 reports the average
+quality and success rate of perturbations. Paraphrasing and
+translation are the most effective: they remove the watermark
+most often, and do not heavily affect quality. Using Dipper [36]
+to paraphrase is only slightly more effective than translation
+attacks, which are easier to run (Section IV-C).
+Paraphrasing and translation attacks. Fig. 7 shows the
+success rate of GPT-3.5 paraphrasing and Russian translation
+against the two best watermarking schemes (distribution shift
+and exponential, with optimal parameters from Fig. 1). GPT-
+3.5 paraphrasing successfully removes the watermark at least
+60% of the time. This success rate is unsurprising, since our
+parameters were chosen primarily to minimize size, not tamper
+resistance. Russian translation is less successful, with under
+20% success rate at all but one temperature. The success rates
+of both attacks are correlated: settings that are robust against
+one are also against the other.
+D. Metric variance
+We added error bars to our main result (Fig. 1) by computing
+the median absolute deviation of watermark sizes when varying
+Fig. 8: Attack success rate and the relative generation quality
+after perturbation. Points are labeled with the attack’s parame-
+ters, and have the same color for an attack class.
+the random seed. These show that the gap in sizes between
+different schemes are statistically significant.
+The empirical variance of the LLM-rating quality metric
+remains mostly constant across different hyper-parameter
+choices, and decreases with temperature for all schemes but
+distribution shift. In particular, for Llama 2, the baseline quality
+has a 95% confidence interval of 0.90 ± 0.005.
+Tamper-resistance variance does change depending on the
+hyper-parameters. Schemes with large sizes tend to have more
+variance. Computing variance for all hyper-parameter choices
+would be too costly, instead, we computed empirical variance
+over a reduced set of hyper-parameters, and found an upper
+bound 95% confidence interval of ±0.07.
+The thresholds we select for quality and tamper-resistance
+metrics are larger than the typical the confidence interval to
+avoid excessive bias.
+VI. DISCUSSION
+A. Indistinguishability
+A watermark is indistinguishable if an adversary without
+the secret key cannot tell apart outputs from the watermarked
+and non-watermarked distributions of the same model. All but
+the distribution-shift schemes are indistinguishable from the
+original distribution when using appropriate randomness (fixed
+randomness or text-dependent randomness with long context
+windows). Indistinguishability guarantees that the watermark
+does not affect the quality of the model. Although useful to
+prevent model theft [20] and for code watermarking, we argue
+that indistinguishability is not crucial for watermarking natural
+language generations.
+Indistinguishability for quality. The distribution-shift scheme
+alters next-token distributions, so it could be detected given
+enough output tokens. Despite this, it does not degrade output
+quality with the right parameters, while requiring less tokens
+to be detected than all other watermarks.
+Indistinguishability for robustness. Indistinguishability does
+not guarantee higher tamper resistance, as shown by the
+
+Fig. 9: Generated tokens per second for each of the four
+sampling strategies.
+distribution-shift scheme’s performance in Fig. 7). In principle,
+distinguishability could help attackers identify and thus remove
+watermarks. However, much simpler attacks like paraphrasing
+are strong enough to remove many watermarks without
+requiring a distinguisher.
+We suspect the distribution-shift scheme performs better
+because (1) it has the freedom to change the output distribution
+which offers more possibilities to embed a watermark; and (2)
+it works with the unmodified logits, before temperature scaling,
+so it can watermark text with low temperatures.
+Indistinguishability for structured tasks. Optimal watermarks
+for text do not work well on code (Section V). In fact,
+only generations from indistinguishable schemes with fixed
+randomness and key length L > 16 pass as many APPS tests
+as the baseline (in a 95% confidence interval of ± 2.2%). Of
+these schemes, the most efficient (exponential, L = 16) only
+watermarks 28% of output programs at T = 1, doubles the
+watermark size of the best schemes for natural language, and
+fails to watermark for T < 1. In a similar manner, distribution-
+shift watermarks decrease the accuracy of multiple choice
+queries. The introduced logit bias leads the LLM to select
+the wrong answer in cases where it is unsure. This is less
+pronounced for Mistral, which is on average more certain of
+its decisions. Both these tasks are sensitive to any token change,
+thus indistinguishability is crucial for correctness.
+B. Computational efficiency
+The watermarking schemes we evaluate should not apprecia-
+bly affect the time or cost to generate outputs from a LLM, since
+their sampling strategies have negligible complexity compared
+to the cost of running a transformer model. Detection algorithms
+are also much faster than LLM inference. Disparities in run-
+times are due to our unoptimized implementations. We show
+in Fig. 9 the effect of the four sampling strategies on the
+number of generated tokens per second.
+C. Limitations
+Watermarking code. Our benchmark is focused on natural
+language tasks. More work is needed to better understand the
+impact of watermarking schemes on code-generation models,
+and to design schemes that work both for natural language and
+code tasks.
+Benchmark size and coverage. Our benchmark only uses three
+language tasks and generates a total of 296 outputs for selecting
+optimal watermarking parameters. We include many more tasks
+for validation, however using more tasks and generations for
+the parameter selection process could help further evaluate
+watermarks, at the cost of increasing benchmark runtime. We
+only ran the benchmark on two open-sourced models, Llama2-
+7b and Mistral-7b. MarkMyWords is designed to compare
+watermarking techniques rather than specific LLMs. We found
+the key factor in watermarking to be the entropy in the model’s
+next token probabilities, which does not necessarily correlate
+with model size or internal architecture. For instance, Mistral
+exhibits more entropy than Llama2 despite having the same
+number of parameters. We believe our conclusions extend to
+larger models.
+Tamper resistance vs. robustness. All watermarks can be
+broken by a sophisticated attacker [77]. We focus on evaluating
+tamper resistance, which is the watermark’s ability to withstand
+output perturbations. We do not evaluate the attacks listed
+in Section III-B, nor do we evaluate perturbations that require
+using another language model (its own outputs could also be
+watermarked). We recognize our tamper-resistance metric is
+an upper bound on robustness against real-world sophisticated
+attackers.
+VII. DESIGNING A WATERMARK
+Following the overview in Section II, we now detail the
+watermarking design space, introducing a taxonomy unifying
+previous schemes. First, we outline the requirements and
+building blocks for a text watermark, summarized in Fig. 10.
+A. Requirements
+A viable watermarking scheme must detect watermarked
+texts accurately without impairing the original model’s utility.
+It should exhibit:
+High recall: Large Pr[Vk(T) = True] for watermarked texts
+with key k.
+High precision: Large Pr[Vk( ˜T) = False] for human-
+generated texts, regardless of key k.
+Quality: Comparable output quality to the original model.
+Robustness: Resistance to changes in watermarked texts.
+Efficiency: Low computational overhead to enable high-
+throughput verification by the LLM provider.
+Additionally, desirable properties include diversity, enabling
+multiple outputs for a prompt (useful for beam-search gen-
+eration), and undetectability (indistinguishability), wherein
+watermarked outputs are hard to distinguish from regular
+outputs (as discussed in Section VI-A).
+We focus on symmetric-key watermarking, where both the
+watermarking and verification procedures share a secret key.
+This is most suitable for proprietary language models served
+via an API. Alternatively, one could publish the key, enabling
+anyone to run the verification procedure.
+
+Parameters: Key k, Sampling C, Randomness R
+Inputs: Probs Dn = {λn
+1, · · · , λn
+d}, Tokens {Ti}i<n
+Output: Next token Tn ←C(Rk({Ti}i<n), Dn)
+Parameters: Key k, Score S, Threshold p
+Inputs: Text T
+Output: Decision V ←P0 (S < Sk(T)) < p
++
+Marking W
+Verification V
+Randomness Source R
+Inputs: Tokens {Ti}i<n Output: Random value rn = Rk({Ti}i<n)
+Text-dependent. Hash function h. Context length H
+(R2) Min Hash
+rn = min (h (Tn−1 ∥k) , · · · , h (Tn−H ∥k))
+(R1) Sliding Window
+rn = h (Tn−1 ∥· · · ∥Tn−H ∥k)
+(R3) Fixed
+Key length L. Expand k to
+pseudo-random sequence {rk
+i }i<L.
+rn = rk
+n (mod L)
+Sampling algorithm C & Per-token statistic s
+Inputs: Random value rn = Rk({Ti}i<n), Probabilities Dn = {λn
+1 , · · · , λn
+d}, Logits Ln = {ln
+1 , · · · , ln
+d }
+(C3) Binary
+Binary alphabet.
+Tn ←0 if rn < λn
+0, else 1.
+s(Tn, r) =
+(
+−log(r) if Tn = 1
+−log(1 −r) if Tn = 0
+(C2) Inverse Transform
+π keyed permutation. η scaling func.
+Tn ←πk
+
+min
+j≤d
+jP
+i=1
+λn
+πk(i) ≥rn
+
+s(Tn, r) = |r −η
+ π−1
+k (Tn)
+
+|
+(C1) Exponential
+h keyed hash function.
+Tn ←arg max
+i≤d
+n
+log(hrn(i))
+λn
+i
+o
+s(Tn, r) = −log(1−hr(Tn))
+(C4) Distribution-shift
+Bias δ, Green list size γ. Keyed permutation π. Tn sampled from eLn = {ln
+i + δ if πrn(i) < γd else ln
+i , 1 ≤i ≤d}
+s(Tn, r) = 1 if πr(Tn) < γd else 0
+Score S
+Inputs: Per-token statistics si,j = s(Ti, rj), where rj = Rk({Tl}l<j)). # Tokens N.
+(S3) Edit Score
+Sψ
+edit = sψ(N, N), sψ(i, j) = min
+
+
+
+
+
+sψ(i −1, j −1) + si,j
+sψ(i −1, j) + ψ
+sψ(i, j −1) + ψ
+(S1) Sum Score
+Ssum =PN
+i=1 si,i
+(S2) Align Score
+Salign = min
+0≤j<N
+N
+P
+i=1
+si,(i+j) mod(N)
+Fig. 10: Watermarking design blocks. There are three main components: randomness source, sampling algorithm (and associated
+per-token statistics), and score function. Each solid box within each of these three components (dashed) denotes a design choice.
+The choice for each component is independent and offers different trade-offs.
+B. Watermark design space
+Designing a good watermark is a balancing act. For instance,
+replacing every word of the output with [WATERMARK] would
+achieve high recall but remove all the utility of the model.
+Existing proposals have cleverly crafted marking procedures
+that are meant to preserve quality, provide high precision
+and recall, and achieve a degree of robustness. Despite their
+apparent differences, we observe that they can all be expressed
+within a unified framework.
+The marking procedure W contains a randomness source R and
+a sampling algorithm C. The randomness source R produces
+a (pseudorandom) value rn for each new token, based on
+the secret key k and the previous tokens T0, · · · , Tn−1. The
+sampling algorithm C uses rn and the model’s next token
+distribution D to select a token.
+The verification procedure V is a one-tailed significance test
+that computes a p-value for the null hypothesis that the text
+is not watermarked. The procedure compares this p-value to a
+threshold, setting the precision of the detector. In particular, we
+compute a per-token score sn,m := s(Tn, rm) for each token
+Tn and randomness rm, aggregate them to obtain an overall
+score S, and compute a p-value from this score. We consider
+all overlaps sn,m instead of only sn,n to support scores that
+consider misaligned randomness and text after perturbation.
+Next, we show how each scheme we consider falls within
+this framework, each with its own choices for R, C, S.
+C. Randomness source R
+As mentioned in Section II-C, randomness in watermarking
+can be generated in two primary manners: text-dependent
+and fixed. Both leverage a secret key to produce pseudo-
+
+random values, reproducible by the verification procedure.
+Text-dependent approaches, such as those by Aaronson and
+Kirchner [1] and Kirchenbauer et al. [33], use prior tokens to
+generate randomness, relying on varied context lengths (H) and
+aggregation functions (f), including sliding window (Fig. 10,
+R1) and min hash (Fig. 10, R2): rn = f (Tn−H, · · · , Tn−1, k),
+where f := h (Tn−1 ∥· · · ∥Tn−H ∥k) for sliding window, and
+f := min (h (Tn−1 ∥k) , · · · , h (Tn−H ∥k)) for min hash.
+Fixed randomness (Fig. 10, R3), employed by Kuditipudi
+et al. [37], generates values based on token index (n), using a
+repeated key sequence of length L across generations: rn =
+fk(n). When L = 1 or H = 0, both sources are identical,
+as rn will be the same value for every token. Zhao et al.
+[78] explored this option using the same sampling algorithm
+as Kirchenbauer et al. [33]. We analyze the impact of H and
+L in Section V-B.
+Christ et al. [8] set a target entropy for the context window
+instead of fixing a window size. This allows more precise
+control over the model’s undetectability. However, one must
+try all context lengths to detect a watermark when using fixed
+entropy, thus we chose to keep using a fixed-size window for
+increased efficiency.
+D. Sampling algorithm C
+We now give more details about the four sampling algorithms
+initially discussed in Section II-C.
+(Fig. 10, C1) Exponential. Conceptualized by Aaronson and
+Kirchner [1] and further employed by Kuditipudi et al. [37],
+this algorithm leverages the Gumbel-max trick. Let Dn =
+{λn
+i , 1 ≤i ≤d} be the distribution of the language model over
+the next token. The exponential scheme will select the next
+token as Tn = arg max {i ≤d, log (hrn (i)) /λn
+i } where h is a
+keyed hash function using rn as its key. The per-token variable
+used in the statistical test is either sn = hrn(Tn) or sn =
+−log (1 −hrn(Tn)), yielding identical results. Prior work uses
+the latter quantity. We adhere to this for our benchmark, but
+analyze the former in Section C.
+(Fig. 10, C2) Inverse transform. This scheme introduced
+by Kuditipudi et al. [37] derives a random permutation using
+the secret key πk. The next token is selected as the smallest
+index in the inverse permutation such that the CDF of the
+next token distribution is at least rn. A detailed formula can
+be found in Fig. 10. Kuditipudi et al. [37] propose using
+sn = |rn −η
+ π−1
+k (Tn)
+
+| as a the test variable, where η
+normalizes the token index to the [0, 1] range.
+(Fig. 10, C3) Binary. Proposed by Christ et al. [8] for binary
+alphabets, this algorithm can adapt to any model by encoding
+tokens into binary sequences. In our implementation, we rely on
+a Huffman encoding of the token set, using frequencies derived
+from a large corpus of natural text. In this case, the distribution
+over the next token reduces to a single probability pn that token
+“0” is selected next, and 1−p that “1” is selected. The sampling
+rule selects 0 if rn < p, and 1 otherwise. The test variable for
+this case is sn = −log (Tnrn + (1 −Tn)(1 −rn)).
+(Fig. 10, C4) Distribution-shift. Suggested by Kirchenbauer
+et al. [33], it tweaks the token distribution to favor logits part
+of a green list. This list is selected using rn as a seed. The
+scheme adds bias δ to logits in the green list. Parameter γ
+controls the size of the green list.
+The advantage of this last scheme over the others is that it
+preserves the model’s diversity: for a given key, the model will
+still generate diverse outputs. In contrast, for a given secret
+key and a given prompt, the first three sampling strategies will
+always produce the same result, since the randomness value
+rn will be the same. Kuditipudi et al. [37] tackles this by
+randomly offsetting the key sequence of fixed randomness for
+each generation. We introduce a skip probability p for the same
+effect on text-dependent randomness. Each token is selected
+without the marking strategy with probability p. We discuss
+generation diversity in Section VII-H.
+Another advantage of the distribution-shift scheme is that
+it can also be used at any temperature, by applying the
+temperature scaling after using the scheme to modify the
+logits. Other models apply temperature before watermarking.
+The distribution-shift scheme is not indistinguishable from the
+original model. However, in practice, neither Aaronson and
+Kirchner [1] or Kuditipudi et al. [37] are fully indistinguishable:
+Gu et al. [18], Jovanovi´c et al. [31] shows it is possible to
+learn a model that can spoof their watermarks.
+E. Score function S
+Determining the presence of a watermark in a text involves
+computing a score from per-token statistics. This score is then
+subject to a one-tailed statistical test where the null hypothesis
+is that the text is not watermarked. In other words, if its p-value
+is under a fixed threshold, the text is watermarked. Different
+works propose different scores.
+(Fig. 10, S1) Sum score. Aaronson and Kirchner [1] and
+Kirchenbauer et al. [33] take the sum of all individual per-token
+statistics: Ssum = PN
+i=1 si = PN
+i=1 s(Ti, ri). This assumes
+alignment between tokens Ti and their corresponding random
+values ri. Although effective for text-dependent randomness,
+it is not suited for fixed randomness. Any token removal at
+the text’s beginning, for instance, misaligns the subsequent ri
+values, compromising the watermark.
+(Fig. 10, S2) Alignment score. Proposed by Kuditipudi et al.
+[37], the alignment score aims to mitigate the misalignment
+issue. Given the sequence of random values ri and the sequence
+of tokens Ti, the verification process now computes different
+versions of the per-token test statistic for each possible overlap
+of both sequences si,j = s(Ti, rj), and selects the minimum
+sum, as shown in Fig. 10.
+(Fig. 10, S3) Edit score. Similar to the alignment score,
+Kuditipudi et al. [37] propose the edit score as an alternative
+for dealing with the misalignment issue. It comes with an
+additional parameter ψ and is defined as Sψ
+edit = sψ(N, N),
+where sψ(N, N) is defined as an edit score, detailed in Fig. 10.
+In all three cases, the average value of the score for
+watermarked text will be lower than for non-watermarked text.
+
+In the case of the sum score, the previous works use the z-test
+on the score to determine whether the text is watermarked,
+but it is also possible, or even better in certain situations, to
+use a different statistical test according to Fernandez et al.
+[14]. When possible, we derive the exact distribution of the
+scores under the null hypothesis (Section VII-F) which is more
+precise than the z-test. When it is not, we rely on an empirical
+T-test, as proposed by Kuditipudi et al. [37]
+F. Score function considerations.
+Exact distribution of the score function. The null hypothesis
+distribution for the exponential scheme with the regular test
+variable is an Irwin-Hall distribution centered with parameter
+N (whose average quickly converges to a normal distribution
+centered in 0.5 with variance
+1
+12N ). When using the log(·)
+test variable, the null distribution is the Erlang distribution
+with parameter N. The binary scheme also follows an Erlang
+distribution, but with many more tokens since each token
+is broken down into a binary vector. The distribution-shift
+scheme has a null distribution a binomial with parameters
+γ, N. We derive these distributions in Appendix C. However,
+for both other scores, and for the inverse transform, the
+null hypothesis distribution is too complex to compute. In
+these cases, verification uses a permutation test, as described
+in Kuditipudi et al. [37]. Instead of comparing the score to a
+known distribution, we sample independent random sequences
+˜ri and compute the score of the text for that randomness: these
+trials are distributed like non watermarked text, so we can use
+them to compute an empirical p-value.
+Analysis of the edit score. We analyzed the tamper resistance
+of the edit score on a subset of watermarks (distribution-shift
+with δ = 2.5 at a temperature of 1, for key lengths between
+1 and 1024). We tried various ψ values between 0 and 1
+for the edit distance, and compared the tamper resistance
+and watermark size of the resulting verification procedures
+to the align score. Using an edit distance does improve tamper
+resistance for key lengths under 32, but at a large efficiency
+cost: for key lengths above 8, the edit score size is at least
+twice that of the align score. We do not recommend using an
+edit score on low entropy models such as Llama 2 chat.
+G. Limitations of building blocks
+Despite designing blocks for independence, certain scheme-
+parameter combinations are sub-optimal:
+Sum score (S1) lacks robustness with fixed randomness (R3).
+Alignment score (S2) is unsuitable for text-dependent random-
+ness (R1, R2) since misalignment is not an issue.
+Edit score (S3) is only viable with text-dependent randomness
+(R1, R2) only for context length of 1. Beyond this, swapping,
+adding, or removing tokens affects random values rather than
+merely causing misalignment.
+Furthermore, using context lengths of 0 or key lengths of 1
+leads to having the same seed for each token. (S2) and (S3)
+are thus unnecessary since misalignment is not possible.
+C4
+C1
+C2
+C3
+Distribution
+Shift
+Exponential
+Binary
+Inverse
+Transform
+S1+R1
+X
+X
+X
+X
+S1+R2
+X
+X
+X
+X
+S2+R3
+X
+X
+X
+X
+S3+R3
+X
+TABLE IV: Tested combinations in the design space, using
+notations from Fig. 10.
+Our evaluation encompasses all logical combinations of
+randomness sources, sampling protocols, and verification scores
+along with their parameters. Due to the edit score’s inefficiency,
+we primarily utilize sum and align scores. Table IV lists
+the tested combinations. The distribution of non-watermarked
+scores is known for orange configurations and unknown for
+blue configurations. We rely on empirical T-tests [37] for
+blue configurations. This method aims to benchmark against
+prior analyses and to explore under-researched combinations,
+potentially identifying superior configurations.
+H. Techniques to enable diverse generations
+For a fixed randomness source, Kuditipudi et al. [37]
+proposes to randomly shift the sequence of random values
+{rk
+i } by an offset s, such that rn = rk
+(s+n) (mod L). This means
+there are a total of L possible unique values for rn depending
+on s. For a text-dependent randomness source, this trick does
+not work.
+Instead, one natural strategy is to randomly skip the wa-
+termarking selection procedure for some tokens, and instead
+sample the next token from the original multinomial distribution.
+We denote S this skip probability.
+Another strategy, discussed by Christ et al. [8], is to
+only start watermarking text after enough empirical entropy
+has been generated: the first tokens are selected without a
+watermark. This accomplishes the same effect, and guarantees
+undetectability. However, as discussed in their Appendix, a
+user not wanting to generate watermarked text can simply run
+the model, keep the first few tokens, add them to the prompt,
+and start again. After repeating this step enough time, they can
+generate arbitrarily long text without a watermark. This seems
+like a larger practical drawback than loosing the guarantee of
+undetectability, thus we use the skip probability instead for
+promoting diversity.
+VIII. SUMMARY
+Our empirical analysis demonstrates existing watermarking
+schemes are nearly ready for deployment, providing effective
+methods to detect machine-generated text. Existing schemes
+can watermark Llama 2 with minimal quality loss in under
+100 tokens, but still struggle at code generation. We provide
+MARKMYWORDS, a benchmark to compare existing and future
+LLM watermarking schemes. We release our code in the hope
+it facilitates evaluation of watermarking schemes and advances
+the discussion on the desirable properties of watermarking
+schemes.
+
+REFERENCES
+[1] Scott Aaronson and Hendrik Kirchner.
+Watermark-
+ing GPT outputs, December 2022.
+URL https://
+www.scottaaronson.com/talks/watermark.ppt.
+[2] Josh Achiam, Steven Adler, Sandhini Agarwal, Lama
+Ahmad, Ilge Akkaya, Florencia Leoni Aleman, Diogo
+Almeida, Janko Altenschmidt, Sam Altman, Shyamal
+Anadkat, et al. GPT-4 technical report. 2023.
+[3] Jacob Austin, Augustus Odena, Maxwell Nye, Maarten
+Bosma, Henryk Michalewski, David Dohan, Ellen Jiang,
+Carrie Cai, Michael Terry, Quoc Le, and Charles Sutton.
+Program synthesis with large language models, 2021.
+[4] Anton Bakhtin, Sam Gross, Myle Ott, Yuntian Deng,
+Marc’Aurelio Ranzato, and Arthur Szlam. Real or fake?
+Learning to discriminate machine from human generated
+text, November 2019.
+[5] Souradip Chakraborty, Amrit Singh Bedi, Sicheng Zhu,
+Bang An, Dinesh Manocha, and Furong Huang. On the
+possibilities of AI-generated text detection, April 2023.
+[6] Canyu Chen and Kai Shu. Can LLM-generated misin-
+formation be detected? arXiv preprint arXiv:2309.13788,
+2023.
+[7] Cheng-Han Chiang and Hung-yi Lee. Can large language
+models be an alternative to human evaluations? In ACL
+2023.
+[8] Miranda Christ, Sam Gunn, and Or Zamir. Undetectable
+watermarks for language models.
+Cryptology ePrint
+Archive, Paper 2023/763, 2023.
+[9] Tianshuo Cong, Xinlei He, and Yang Zhang. SSLGuard:
+A watermarking scheme for self-supervised learning pre-
+trained encoders.
+In Proceedings of the 2022 ACM
+SIGSAC Conference on Computer and Communications
+Security.
+[10] Ingemar J. Cox, Ton Kalker, Georg Pakura, and Mathias
+Scheel. Information transmission and steganography. In
+Mauro Barni, Ingemar Cox, Ton Kalker, and Hyoung-
+Joong Kim, editors, Digital Watermarking. Springer Berlin
+Heidelberg, 2005.
+[11] Tiziano Fagni, Fabrizio Falchi, Margherita Gambini,
+Antonio Martella, and Maurizio Tesconi.
+Tweepfake:
+About detecting deepfake tweets. PLOS ONE, 2021.
+[12] Jaiden Fairoze, Sanjam Garg, Somesh Jha, Saeed Mahlou-
+jifar, Mohammad Mahmoody, and Mingyuan Wang.
+Publicly detectable watermarking for language models,
+2023.
+[13] Tom Fawcett. An introduction to ROC analysis. Pattern
+Recognition Letters, 2006.
+[14] Pierre Fernandez, Antoine Chaffin, Karim Tit, Vivien
+Chappelier, and Teddy Furon. Three bricks to consolidate
+watermarks for large language models, July 2023.
+[15] P.J. Finlay and Contributors Argos Translate. Argos trans-
+late, August 2021. URL https://github.com/argosopentech/
+argos-translate.
+[16] Sebastian Gehrmann, Hendrik Strobelt, and Alexander
+Rush.
+GLTR: Statistical detection and visualization
+of generated text. In Proceedings of the 57th Annual
+Meeting of the Association for Computational Linguistics:
+System Demonstrations. Association for Computational
+Linguistics, 2019.
+[17] Josh A. Goldstein, Girish Sastry, Micah Musser, Renee
+DiResta, Matthew Gentzel, and Katerina Sedova. Genera-
+tive language models and automated influence operations:
+Emerging threats and potential mitigations, 2023.
+[18] Chenchen Gu, Xiang Lisa Li, Percy Liang, and Tatsunori
+Hashimoto.
+On the learnability of watermarks for
+language models, 2024.
+[19] Xuanli He, Qiongkai Xu, Lingjuan Lyu, Fangzhao Wu,
+and Chenguang Wang. Protecting intellectual property
+of language generation apis with lexical watermark.
+In Proceedings of the AAAI Conference on Artificial
+Intelligence, 2022.
+[20] Xuanli He, Qiongkai Xu, Yi Zeng, Lingjuan Lyu,
+Fangzhao Wu, Jiwei Li, and Ruoxi Jia. Cater: Intellectual
+property protection on text generation apis via conditional
+watermarks. Advances in Neural Information Processing
+Systems, 2022.
+[21] Zhiwei He, Binglin Zhou, Hongkun Hao, Aiwei Liu, Xing
+Wang, Zhaopeng Tu, Zhuosheng Zhang, and Rui Wang.
+Can watermarks survive translation? on the cross-lingual
+consistency of text watermark for large language models,
+2024. URL https://arxiv.org/abs/2402.14007.
+[22] Dan Hendrycks, Steven Basart, Saurav Kadavath, Mantas
+Mazeika, Akul Arora, Ethan Guo, Collin Burns, Samir
+Puranik, Horace He, Dawn Song, and Jacob Steinhardt.
+Measuring Coding Challenge Competence With APPS.
+In NeurIPS, 2021.
+[23] Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou,
+Mantas Mazeika, Dawn Song, and Jacob Steinhardt.
+Measuring Massive Multitask Language Understanding.
+Proceedings of the International Conference on Learning
+Representations (ICLR), 2021.
+[24] Karl Moritz Hermann, Tomas Kocisky, Edward Grefen-
+stette, Lasse Espeholt, Will Kay, Mustafa Suleyman, and
+Phil Blunsom. Teaching Machines to Read and Com-
+prehend. In Advances in Neural Information Processing
+Systems, 2015.
+[25] Ari Holtzman, Jan Buys, Li Du, Maxwell Forbes, and
+Yejin Choi. The curious case of neural text degeneration.
+In International Conference on Learning Representations,
+2020.
+[26] Nicholas Hopper, Luis von Ahn, and John Langford.
+Provably secure steganography. IEEE Transactions on
+Computers, 2009.
+[27] Zhengmian Hu, Lichang Chen, Xidong Wu, Yihan Wu,
+Hongyang Zhang, and Heng Huang. Unbiased watermark
+for large language models. In The Twelfth International
+Conference on Learning Representations, 2024. URL
+https://openreview.net/forum?id=uWVC5FVidc.
+[28] Daphne Ippolito, Daniel Duckworth, Chris Callison-
+Burch, and Douglas Eck. Automatic detection of gener-
+ated text is easiest when humans are fooled, May 2020.
+
+[29] Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch,
+Chris Bamford, Devendra Singh Chaplot, Diego de las
+Casas, Florian Bressand, Gianna Lengyel, Guillaume
+Lample, Lucile Saulnier, Lélio Renard Lavaud, Marie-
+Anne Lachaux, Pierre Stock, Teven Le Scao, Thibaut
+Lavril, Thomas Wang, Timothée Lacroix, and William El
+Sayed. Mistral 7B, 2023. Licensed under the Apache 2.0
+license.
+[30] Zhengyuan Jiang, Jinghuai Zhang, and Neil Zhenqiang
+Gong.
+Evading watermark based detection of AI-
+generated content, May 2023.
+[31] Nikola Jovanovi´c, Robin Staab, and Martin Vechev.
+Watermark stealing in large language models. 2024.
+[32] Nurul Shamimi Kamaruddin, Amirrudin Kamsin, Lip Yee
+Por, and Hameedur Rahman. A review of text watermark-
+ing: Theory, methods, and applications. IEEE Access,
+2018.
+[33] John Kirchenbauer, Jonas Geiping, Yuxin Wen, Jonathan
+Katz, Ian Miers, and Tom Goldstein.
+A watermark
+for large language models. In Proceedings of the 40th
+International Conference on Machine Learning, 2023.
+[34] Guillaume Klein, Yoon Kim, Yuntian Deng, Jean Senellart,
+and Alexander Rush. OpenNMT: Open-source toolkit for
+neural machine translation. In Proceedings of ACL 2017,
+System Demonstrations, Vancouver, Canada. Association
+for Computational Linguistics.
+[35] Tom Kocmi and Christian Federmann. Large language
+models are state-of-the-art evaluators of translation quality,
+2023.
+[36] Kalpesh Krishna, Yixiao Song, Marzena Karpinska, John
+Wieting, and Mohit Iyyer. Paraphrasing evades detectors
+of AI-generated text, but retrieval is an effective defense,
+March 2023.
+[37] Rohith Kuditipudi, John Thickstun, Tatsunori Hashimoto,
+and Percy Liang. Robust distortion-free watermarks for
+language models, July 2023.
+[38] Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng,
+Lianmin Zheng, Cody Hao Yu, Joseph Gonzalez, Hao
+Zhang, and Ion Stoica. Efficient memory management
+for large language model serving with pagedattention. In
+SOSP, 2023.
+[39] Taehyun Lee, Seokhee Hong, Jaewoo Ahn, Ilgee Hong,
+Hwaran Lee, Sangdoo Yun, Jamin Shin, and Gunhee Kim.
+Who wrote this code? watermarking for code generation,
+2024.
+[40] Taehyun Lee, Seokhee Hong, Jaewoo Ahn, Ilgee Hong,
+Hwaran Lee, Sangdoo Yun, Jamin Shin, and Gunhee Kim.
+Who wrote this code? watermarking for code generation,
+2024. URL https://arxiv.org/abs/2305.15060.
+[41] Percy Liang et al. Holistic evaluation of language models,
+November 2022.
+[42] Eugene Lim, Glenice Tan, Tan Kee Hock, and Timothy
+Lee. Hacking humans with ai as a service. DEF CON
+29, 2021.
+[43] Aiwei Liu, Leyi Pan, Xuming Hu, Shu’ang Li, Lijie Wen,
+Irwin King, and Philip S. Yu. An Unforgeable Publicly
+Verifiable Watermark for Large Language Models, 2024.
+URL https://arxiv.org/abs/2307.16230.
+[44] Aiwei Liu, Leyi Pan, Xuming Hu, Shiao Meng, and
+Lijie Wen. A semantic invariant robust watermark for
+large language models, 2024. URL https://arxiv.org/abs/
+2310.06356.
+[45] Yang Liu, Dan Iter, Yichong Xu, Shuohang Wang,
+Ruochen Xu, and Chenguang Zhu.
+G-Eval: NLG
+Evaluation using GPT-4 with Better Human Alignment,
+2023.
+[46] Yijian Lu, Aiwei Liu, Dianzhi Yu, Jingjing Li, and Irwin
+King.
+An entropy-based text watermarking detection
+method, 2024. URL https://arxiv.org/abs/2403.13485.
+[47] Mohammed A. Majeed, Rossilawati Sulaiman, Zarina
+Shukur, and Mohammad K. Hasan. A review on text
+steganography techniques. Mathematics, 2021.
+[48] Meta. Meta Llama 3, 2024. URL https://llama.meta.com/
+llama3/. Licensed under the Meta Llama 3 Community
+License.
+[49] George A. Miller.
+WordNet: A lexical database for
+english. In Human Language Technology: Proceedings
+of a Workshop Held at Plainsboro, New Jersey, 1994.
+[50] Eric Mitchell, Yoonho Lee, Alexander Khazatsky, Christo-
+pher D. Manning, and Chelsea Finn. DetectGPT: Zero-
+shot machine-generated text detection using probability
+curvature.
+In Proceedings of the 40th International
+Conference on Machine Learning, 2023.
+[51] OpenAI.
+GPT-2 Output Dataset Detector, 2021.
+URL https://github.com/openai/gpt-2-output-dataset/tree/
+master/detector.
+[52] OpenAI.
+GPT-4 system card, 2023.
+URL https://
+cdn.openai.com/papers/gpt-4-system-card.pdf.
+[53] OpenAI.
+New AI classifier for indicating AI-written
+text, January 2023. URL https://openai.com/blog/new-ai-
+classifier-for-indicating-ai-written-text.
+[54] Leyi Pan, Aiwei Liu, Zhiwei He, Zitian Gao, Xuandong
+Zhao, Yijian Lu, Binglin Zhou, Shuliang Liu, Xuming
+Hu, Lijie Wen, et al. MarkLLM: An open-source toolkit
+for LLM watermarking. arXiv preprint arXiv:2405.10051,
+2024.
+[55] European
+Parliament.
+Artificial
+Intelligence
+Act.
+URL https://www.europarl.europa.eu/doceo/document/
+TA-9-2024-0138_EN.pdf.
+[56] Krishna Pillutla, Swabha Swayamdipta, Rowan Zellers,
+John Thickstun, Sean Welleck, Yejin Choi, and Zaid
+Harchaoui. Mauve: Measuring the gap between neural
+text and human text using divergence frontiers.
+In
+M. Ranzato, A. Beygelzimer, Y. Dauphin, P.S. Liang,
+and J. Wortman Vaughan, editors, Advances in Neural
+Information Processing Systems, volume 34, pages
+4816–4828. Curran Associates, Inc., 2021.
+URL
+https://proceedings.neurips.cc/paper_files/paper/2021/
+file/260c2432a0eecc28ce03c10dadc078a4-Paper.pdf.
+[57] Krishna Pillutla, Swabha Swayamdipta, Rowan Zellers,
+John Thickstun, Sean Welleck, Yejin Choi, and Zaid
+Harchaoui. MAUVE: Measuring the Gap Between Neural
+
+Text and Human Text using Divergence Frontiers. In
+NeurIPS, 2021.
+[58] Stefano Giovanni Rizzo, Flavio Bertini, Danilo Montesi,
+and Carlo Stomeo. Text watermarking in social media. In
+Proceedings of the IEEE/ACM International Conference
+on Advances in Social Networks Analysis and Mining
+2017.
+[59] Vinu Sankar Sadasivan, Aounon Kumar, Sriram Bala-
+subramanian, Wenxiao Wang, and Soheil Feizi.
+Can
+AI-generated text be reliably detected?, March 2023.
+[60] Leonard Salewski, Stephan Alaniz, Isabel Rio-Torto, Eric
+Schulz, and Zeynep Akata.
+In-context impersonation
+reveals large language models’ strengths and biases.
+NeurIPS, 2024.
+[61] Abigail See, Peter J. Liu, and Christopher D. Manning.
+Get To The Point: Summarization with Pointer-Generator
+Networks. In Proceedings of the 55th Annual Meeting of
+the Association for Computational Linguistics, 2017.
+[62] Yuki Takezawa, Ryoma Sato, Han Bao, Kenta Niwa, and
+Makoto Yamada. Necessary and sufficient watermark for
+large language models, 2023.
+[63] Milad Taleby Ahvanooey, Hassan Dana Mazraeh, and
+Seyed Tabasi.
+An innovative technique for web text
+watermarking (aitw). Information Security Journal: A
+Global Perspective, 2016.
+[64] Ruixiang Tang, Yu-Neng Chuang, and Xia Hu.
+The
+science of detecting llm-generated texts, 2023.
+[65] Hugo Touvron et al.
+Llama 2: Open foundation and
+fine-tuned chat models, July 2023.
+[66] Shangqing Tu, Yuliang Sun, Yushi Bai, Jifan Yu, Lei Hou,
+and Juanzi Li. Waterbench: Towards holistic evaluation
+of watermarks for large language models, 2023.
+[67] Adaku Uchendu, Thai Le, Kai Shu, and Dongwon Lee.
+Authorship attribution for neural text generation. In Pro-
+ceedings of the 2020 Conference on Empirical Methods
+in Natural Language Processing (EMNLP), 2020.
+[68] Christoforos Vasilatos, Manaar Alam, Talal Rahwan, Yasir
+Zaki, and Michail Maniatakos. HowkGPT: Investigating
+the detection of ChatGPT-generated university student
+homework through context-aware perplexity analysis.
+arXiv preprint arXiv:2305.18226, 2023.
+[69] Jiaan Wang, Yunlong Liang, Fandong Meng, Zengkui
+Sun, Haoxiang Shi, Zhixu Li, Jinan Xu, Jianfeng Qu,
+and Jie Zhou. Is ChatGPT a Good NLG Evaluator? A
+Preliminary Study, 2023.
+[70] Peiyi Wang, Lei Li, Liang Chen, Zefan Cai, Dawei
+Zhu, Binghuai Lin, Yunbo Cao, Qi Liu, Tianyu Liu,
+and Zhifang Sui. Large language models are not fair
+evaluators, 2023.
+[71] Sean Welleck, Ilia Kulikov, Stephen Roller, Emily Di-
+nan, Kyunghyun Cho, and Jason Weston. Neural text
+generation with unlikelihood training. In International
+Conference on Learning Representations, 2020.
+[72] Thomas Wolf et al. Transformers: State-of-the-art nat-
+ural language processing. In Proceedings of the 2020
+Conference on Empirical Methods in Natural Language
+Processing: System Demonstrations, 2020.
+[73] Jiaying Wu, Jiafeng Guo, and Bryan Hooi. Fake news
+in sheep’s clothing: Robust fake news detection against
+LLM-empowered style attacks. In SIGKDD, 2024.
+[74] Yihan Wu, Zhengmian Hu, Junfeng Guo, Hongyang
+Zhang, and Heng Huang.
+A resilient and accessible
+distribution-preserving watermark for large language
+models, 2024. URL https://arxiv.org/abs/2310.07710.
+[75] X Jessie Yang, Christopher Schemanske, and Christine
+Searle. Toward quantifying trust dynamics: How people
+adjust their trust after moment-to-moment interaction with
+automation. Human Factors, 2023.
+[76] Rowan Zellers, Ari Holtzman, Hannah Rashkin, Yonatan
+Bisk, Ali Farhadi, Franziska Roesner, and Yejin Choi.
+Defending against neural fake news.
+In Advances in
+Neural Information Processing Systems, 2019.
+[77] Hanlin Zhang, Benjamin L. Edelman, Danilo Francati,
+Daniele Venturi, Giuseppe Ateniese, and Boaz Barak. Wa-
+termarks in the sand: Impossibility of strong watermarking
+for generative models, 2023.
+[78] Xuandong Zhao, Prabhanjan Ananth, Lei Li, and Yu-
+Xiang Wang.
+Provable robust watermarking for ai-
+generated text, 2023.
+[79] Xuandong Zhao, Yu-Xiang Wang, and Lei Li. Protecting
+language generation models via invisible watermarking.
+In Andreas Krause, Emma Brunskill, Kyunghyun Cho,
+Barbara Engelhardt, Sivan Sabato, and Jonathan Scarlett,
+editors, Proceedings of the 40th International Conference
+on Machine Learning, volume 202 of Proceedings of
+Machine Learning Research, pages 42187–42199. PMLR,
+23–29 Jul 2023. URL https://proceedings.mlr.press/v202/
+zhao23i.html.
+[80] Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan
+Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuo-
+han Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E.
+Gonzalez, and Ion Stoica. Judging LLM-as-a-Judge with
+MT-Bench and Chatbot Arena, 2023.
+[81] Zachary Ziegler, Yuntian Deng, and Alexander Rush.
+Neural linguistic steganography. In Kentaro Inui, Jing
+Jiang, Vincent Ng, and Xiaojun Wan, editors, Proceedings
+of the 2019 Conference on Empirical Methods in Natural
+Language Processing and the 9th International Joint
+Conference on Natural Language Processing (EMNLP-
+IJCNLP), 2019.
+
+APPENDIX A
+BENCHMARK DETAILS
+Our benchmark (Section III) relies on a set of three prompt
+templates for each task, on three additional tasks for measuring
+watermarks in different situations, on a rating prompt, and
+a set of attacks. We provide details about the benchmark’s
+implementation and the prompts we used in this section.
+A. Task prompts
+(1) Book report prompt. “Write a book report about X, written
+by Y.”, where X is a book title and Y is the book’s author.
+(2) Story generation prompt. “Write a X story about Y.”,
+where X is the tone, and Y is the topic.
+(3) Fake news prompt. “Write a news article about X’s visit
+to Y in Z.”, where X and Y are two political figures, and Z is
+a location.
+B. Validation tasks
+(V1) Legal Research. “Conduct legal research on X. Please
+summarize relevant regulations by region or country and include
+citations. Make conclusions based on your research about key
+developments in this field. Based on the current trends, make
+your forecast about how X will be regulated in the future.“
+where X is the topic (e.g. AI)
+(V1) RFC Summaries. “Write a detailed explanation and
+description of X: Y. Make sure is it self contained so I do not
+need to read the RFC myself to fully understand it.“ where X
+is the RFC number and Y the RFC title.
+(V2) Multilingual. “Ecris un résumé detaillé de X, écrit par
+Y.“, where X is a book title and Y is the book’s author.
+(V3) Low entropy tasks. We use 100 generations for task (1)
+at T = 1.0 as the inputs for both paraphrasing and translation.
+Translation is done from English to French.
+(V4) Code generation. We use 300 coding problems from
+the APPS dataset [22]. We selected those with the longest
+median response, as to more effectively measure watermark
+size, and only chose problems with the lowest difficulty setting
+(“introductory”).
+(V5) Short summarization. X is a news article, XX is a
+reference article and YY its summary (chosen to be the first
+element in the CNN/DM dataset [24, 61])
+Extract a 3 sentence highlight from the following article. Here is
+one example for reference.
+Example:
+* Article: XX
+* Highlights: YY
+Current Task:
+* Article: X
+* Highlights:
+(V6) Question answering. X is a question, Y are choices,
+XX is a reference question, YY its reference choices, and
+ZZ its answer (chosen to be the first element in the MMLU
+dataset [23])
+Here is a question. You must select one of the options, and return
+the letter of the correct answer inside brackets. Here is an example
+for reference:
+Question: XX
+Choices: YY
+Answer: ZZ
+Now here’s the current question:
+Question: X
+Choices: Y
+Answer:
+C. Rating prompt
+«SYS» You are given a prompt and a response, and you provide a
+grade out of 100 measuring the quality of the response, in terms
+of accuracy, level of details, and typographical, grammatical and
+lexical correctness. Remove points as soon as one of the criteria is
+missed. «/SYS»
+Prompt: <TASK PROMPT>
+Response: <MODEL OUTPUT>
+APPENDIX B
+ADDITIONAL ANALYSIS
+Here we present additional figures to support results in the
+main text and discuss further findings.
+Fig. 11: Correlation between robustness metric and attack
+success. On the right, for the Russian translation attack. On the
+left, for the GPT paraphrasing attack. Each point is a unique
+watermark parameter setting.
+
+Fig. 12: Watermark size at near-optimal quality
+for each watermarking schemes taken from the
+literature, using Mistral-7b-Instruct, at various
+sampling temperatures. The distribution-shift
+scheme [33] outperforms all others and needs
+less than 80 tokens to be detected.
+Fig. 13: Size and quality for varying biases, at
+T = 0.3 and T = 1. The quality is relative to
+the quality of the non-watermarked model at the
+given temperature. Increasing bias decreases size
+but also quality. Low temperature settings have
+less quality degradation.
+Fig. 14: Size and tamper resistance as a function
+of key lengths (only using distribution-shift
+schemes with δ ≤2). Increasing key length
+increases size and decreases tamper resistance.
+
+Fig. 15: Size of watermarks from Fig. 1 on validation tasks V1 and V2 both Llama-2-7B-chat and Mistral-7B-Instruct.
+Fig. 16: Correctness of watermarked QA answers (V6) relative to the correctness of the non-watermarked baselines, for
+watermarks from Fig. 1.
+Fig. 17: Watermark size using watermarks from Fig. 1.
+Fig. 18: Figure R5: Percentage of APPS test case problems
+passed, using Llama-3-8B-Instruct at T=1 with the optimal
+schemes for Llama-2.
+
+Constraint
+Temp.
+Distribution Shift
+Exponential
+Inverse Transform
+Binary
+1% Quality,
+> 0.2 Tamper
+Resistance
+0
+53 (1.5)
+∞
+∞
+∞
+0.3
+55 (0.5)
+∞
+∞
+∞
+0.7
+50 (1.0)
+178.5 (6.0)
+453.5 (15.0)
+∞
+1
+114.5 (2.5)
+100 (2.5)
+205 (4.0)
+372.5 (16.5)
+1% Quality,
+No Tamper Re-
+sistance
+0
+53 (1.5)
+∞
+∞
+∞
+0.3
+55 (0.5)
+980 (45)
+∞
+∞
+0.7
+50 (1.0)
+178.5 (6.0)
+457.5 (10.0)
+∞
+1
+114.5 (2.5)
+100 (2.5)
+195 (7.0)
+372.5 (16.5)
+10% Quality,
+> 0.2 Tamper
+Resistance
+0
+55 (1.0)
+∞
+∞
+∞
+0.3
+55 (0.5)
+∞
+∞
+∞
+0.7
+55 (1.0)
+168.5 (7.0)
+453.5 (15.0)
+∞
+1
+73 (1.5)
+80.5 (2.0)
+205 (4.0)
+372.5 (16.5)
+10% Quality,
+No Tamper Re-
+sistance
+0
+55 (1.0)
+∞
+∞
+∞
+0.3
+55 (0.5)
+∞
+∞
+∞
+0.7
+55 (1.0)
+168.5 (7.0)
+457.5 (10.0)
+∞
+1
+73 (1.5)
+80.5 (2.0)
+195 (7.0)
+372.5 (16.5)
+TABLE V: Size of ideal watermark under four tested constraints, for each sampling temperature and watermark on Llama 2.
+These are the values used in Fig. 1. In parenthesis, the empirical median absolute deviation.
+Constraint
+Temp.
+Distribution Shift
+Exponential
+Inverse Transform
+Binary
+1% Quality,
+> 0.2 Tamper
+Resistance
+0
+48
+∞
+∞
+∞
+0.3
+43
+456.5
+∞
+∞
+0.7
+43
+108
+206
+454.5
+1
+73
+68
+116
+174
+1% Quality,
+No Tamper Re-
+sistance
+0
+48
+∞
+∞
+∞
+0.3
+43
+456.5
+∞
+∞
+0.7
+43
+108
+224
+454.5
+1
+73
+68
+116
+174
+10% Quality,
+> 0.2 Tamper
+Resistance
+0
+45
+∞
+∞
+∞
+0.3
+39.5
+456.5
+∞
+∞
+0.7
+43
+101
+206
+454.5
+1
+38
+58
+116
+174
+10% Quality,
+No Tamper Re-
+sistance
+0
+45
+∞
+∞
+∞
+0.3
+39.5
+456.5
+∞
+∞
+0.7
+43
+101
+224
+454.5
+1
+38
+58
+116
+174
+TABLE VI: Size of ideal watermark under four tested thresholds, for each sampling temperature and watermark on Mistral.
+These are the values used in Fig. 12.
+
+APPENDIX C
+EXPONENTIAL SCHEME PROOFS
+We now analyze the exponential scheme when the statistical
+test used is sn = hrn(Tn). We use the same notation as
+in Fig. 10. In particular, hs is a secure hash function mapping
+strings to [0, 1] with seed s, k is a key selected uniformly at
+random amongst a set of keys K. Consider an execution of the
+language model which produced tokens T1, . . . , Tn up until
+now (including the prompt). The next token distribution is repre-
+sented as DT1,··· ,Tn = {λi, P(Tn+1 = i | T1, · · · , Tn) = λi}.
+For an i.i.d randomness source (producing i.i.d random val-
+ues), the exponential selection procedure has the following
+properties:
+P1 For a uniformly random key k, the distribution over the
+next token is the same as without the watermark.
+Pk( eTn+1 = i | Ti≤n) = P(Tn+1 = i | Ti≤n) = λi
+(1)
+P2 The expectation of the hash of the next token is equal to
+the spike entropy10 of the next token distribution. This
+is always larger than the expectation of the hash of the
+next token without watermark, only being equal for a
+degenerate distribution with only one token having a non-
+zero probability.
+n
+n + 1 ≥Ek
+h
+hs
+
+eTn+1
+i
+= S (DT1,··· ,Tn, 1)
+S (DT1,··· ,Tn, 1) =
+d
+X
+j=1
+λj
+1 + λj
+≥Ek [hs (Tn+1)] = 1
+2
+(2)
+When using the sum score, we perform a hypothesis test,
+where under H0 the text is not watermarked, and under H1 it
+is. In particular, let ¯h = 1
+n
+Pn
+i=1 hs (Ti) be the average hash
+over a text of n tokens. Let Si be the average spike entropy
+of modulus i over the text. ¯h follows a Bates distribution
+under H0 with parameter n (which is well approximated by a
+Gaussian with average 0.5 and variance
+1
+12n. The distribution
+under H1 has an average of S1 and asymptotically follows a
+Gaussian distribution centered in S1 with variance S2−S2
+1
+n
+.
+a) Proof of P1: Let r = R(k, {Ti}i<n) be our random-
+ness source. We assume that it is uniformly distributed between
+0 and 1, for k ∼U(K), with |K| large enough. Since hs is a
+secure hash function, we posit:
+A1 The hash of each token is uniformly distributed: hr(i) ∼
+U ([0, 1]) ∀i, T1, · · · , Tn.
+A2 The token hashes {hr(i), 1 ≤i ≤d} are mutually
+independent.
+We have:
+Pk( eTn+1 = i|Ti≤n) = Pk
+
+∀j ̸= i, log(hr(i))
+λi
+> log(hr(j))
+λj
+
+(3)
+10Spike entropy is defined in [33]. For a discrete distribution D =
+{λ1, · · · , λn}, the spike entropy S (D, t) (said modulus i) is defined as
+Pn
+j=1
+λj
+t+λj .
+We can simplify this expression: if {hr(i)}i are mutually inde-
+pendent uniformly distributed random variables between 0 and
+1, then
+n
+−log(hr(i))
+λi
+o
+i are mutually independent exponentially
+distributed random variables, with parameters {λi}i. By writing
+ui = −log(hr(i))
+λi
+, we then have:
+Pk( eTn+1 = i|Ti≤n) = Pk
+
+ui < min
+j̸=i (uj)
+
+(4)
+We now use a useful property of exponential random
+variables: The minimum of a set of independent exponen-
+tial random variables of parameters λ1, · · · , λn is also an
+exponential random variable, with parameter Pn
+i=1 λi. Thus,
+minj̸=i(uj) ∼Exp(1 −λi) (since λi are a probability
+distribution, they sum to 1, so P
+j̸=i λj = 1 −λi). We can
+now finish the proof.
+Pk( eTn+1 = i|Ti≤n) = Pk
+
+ui < min
+j̸=i (uj)
+
+=
+Z ∞
+0
+λie−λix
+Z ∞
+x
+(1 −λi)e−(1−λi)ydxdy
+= λi = P(Tn+1 = i|Ti≤n).
+(5)
+b) Proof of P2: For a sequence of previous tokens Ti≤n =
+T1, · · · , Tn, lets compute the expected value of the hash of the
+next token under both the watermarked and non-watermarked
+model.
+As discussed above, for k ∼U(K), hr(i) ∼U([0, 1]) and
+are mutually independent, and we have Ek [hr(i)] = 1
+2
+For the non-watermarked model, we select a token indepen-
+dently from the key k or the values hr(i), thus:
+Ek [hr (Tn+1)] = Ek
+" d
+X
+i=1
+1{Tn+1=i}hr (i)
+#
+=
+d
+X
+i=1
+E
+
+1{Tn+1=i}
+
+Ek [hr (i)]
+=
+d
+X
+i=1
+1
+2λi = 1
+2
+(6)
+For the watermarked model, token selection is no longer inde-
+pendent from the key k or the hash values. Instead, we use the
+notations from the previous proof to compute this expectation.
+In particular, we have {Tn+1 = i} = {∀j ̸= i, ui < uj} =
+{ui < minj̸=i(uj)}, with ui exponentially distributed with
+parameter λi, and minj̸=i(uj) exponentially distributed with pa-
+rameter 1−λi, both independent. Also, since ui = −log(hr(i))
+λi
+,
+
+we have hr(i) = e−uiλi.
+Ek [hr (Tn+1)] = Ek
+" V
+X
+i=1
+1{Tn+1=i}hr (i)
+#
+=
+d
+X
+i=1
+ZZ ∞
+0
+e−λix1x<yλie−λix(1 −λi)e−(1−λi)ydxdy
+=
+d
+X
+i=1
+λi
+1 + λi
+(7)
+Thus, the expectation of the watermarked model’s next token
+hash is equal to the spike entropy of next token distribution
+(as defined in [33]). Analysis of the spike entropy shows that
+its minimum value is 0.5, when all but one token have 0
+probability, and its maximum is
+d
+d+1, when all tokens are
+equally probable.
+c) Verification: The verification procedure computes
+the average hash value over all tokens in a text: ¯h =
+1
+n
+Pn
+i=1 hr (Ti). Let’s analyze this random variable ¯h in both
+the watermarked and non-watermarked settings. In the regular
+case, we can show, for k ∼U(K), that hr (Ti) ∼U([0, 1]),
+for some x ∈[0, 1]:
+Pk (hr (Ti) < x)
+=
+d
+X
+j=1
+Pk ({Ti = j} ∩{hr (i) < x})
+=
+d
+X
+j=1
+P ({Ti = j}) P ({hr (i) < x}) = x
+(8)
+Which is the CDF of a continuous uniform random variable
+between 0 and 1. Furthermore, since the randomness source
+is i.i.d, the hr(Ti)i are independent. Thus ¯h is the average
+of n independent uniform random variables over [0, 1], so it
+follows a Bates distribution. When n increases to +∞, B(n)
+is equivalent to N(0.5,
+1
+12n). In practice, even for small values
+of n, the Bates distribution is close to Gaussian.
+In the watermarked case, we start by computing the CDF
+and PDF of the hash of a single token, hr (Ti).
+Pk (hr (Ti) < x) =
+d
+X
+j=1
+Pk ({Ti = j} ∩{hr (j) < x})
+=
+d
+X
+j=1
+ZZ ∞
+0
+1z<y1z>−log(z)
+λj
+λje−λjz(1 −λj)e−(1−λj)ydzdy
+=
+d
+X
+j=1
+λjx
+1
+λj .
+(9)
+Thus the hash of a token has CDF Pd
+j=1 λjx
+1
+λj and PDF
+Pd
+j=1 x
+1
+λj −1. Using these formulas, we can derive higher
+order moments for the hash: Ek [hr (Ti)m] = Pd
+j=1
+λj
+1+mλj .
+In particular, each moment of order m is bounded between 1
+and
+V
+m+V . We denote Sm to be the average moment of order
+m over the text (which happens to also be the average spike
+entropy of modulus m).
+We define s2
+n = Pn
+i=1 Ek
+h
+(hr (Ti) −Ek [hr (Ti)])2i
+=
+n
+ S2 −S2
+1
+
+. Since we assume each hash is independent,
+thanks to the i.i.d randomness, we can use Lyapunov’s central
+limit theorem on the sequence of hash values. In particular,
+each hash has bounded moments of all orders (and bounded
+away from zero), so all conditions of the theorem apply.
+1
+sn
+n
+X
+i=1
+(hr (Ti) −Ek [hr (Ti)])
+n→∞
+−−−−→
+d
+N(0, 1)
+=⇒1
+n
+n
+X
+i=1
+(hr (Ti) −Ek [hr (Ti)])
+n→∞
+−−−−→
+d
+N(0, S2 −S2
+1
+n
+)
+=⇒
+ ¯h −S1
+ n→∞
+−−−−→
+d
+N(0, S2 −S2
+1
+n
+)
+=⇒¯h
+n→∞
+−−−−→
+d
+N(S1, S2 −S2
+1
+n
+)
+(10)
+Thus, as n increases, non watermarked text will have ¯h get
+closer to 0.5, while watermarked text will have ¯h get closer
+to S1. In particular, if we fix a maximum false positive ratio
+p (number of regular text mistaken for watermarked text),
+the detection strategy is to flag text as watermarked if the
+probability of ¯h in the non-watermarked hypothesis is lower
+than p, or equivalently, 1−Φ0.5, 1/12n
+ ¯h
+
+< p, with Φ0.5, 1/12n
+the CDF of a Gaussian centered in 0.5 with variance 1/12n.
+Furthermore, given values of S1 and S2, for large values of n,
+we can compute the expected false negative ratio of our detector.
+Given the quantile q associated with the false positive ratio
+p (Φ0.5, 1/12n (q) = 1 −p), we have FN = ΦS1, (S2−S2
+1)/n(q).
+This gets exponentially lower as the average entropy S1 and n
+increase.
+APPENDIX D
+SOCIETAL IMPACT
+Large language models can be misused, which motivates
+our benchmark for model output watermarking schemes. We
+list potential societal impacts of our work below.
+Designing new watermarks. Our unified framework for
+symmetric-key watermarking schemes enables practitioners
+to build and evaluate custom watermarking schemes using
+building blocks from different existing work.
+Deployment readiness. The results of our benchmark on
+existing watermarking schemes indicates the need for more
+work to understand the impact of watermarks on highly
+structured outputs (e.g., code generation).
+Regulation. Recent legislation from the European Union has
+placed obligations on providers and users of AI systems to
+enable the detection and tracing of AI-generated content and to
+use watermarking schemes at the “generally acknowledged state
+of the art” [55]. There has yet to be consensus reached on which
+watermarking scheme is the “best”. Our benchmark provides a
+common ground for evaluating watermarking schemes.
+
+Altogether, our work leads to a better understanding of how
+current model output watermarking schemes perform on real-
+world use. This can be useful in the development systems that
+wish to mitigate the risks of misusing large language models.

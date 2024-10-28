@@ -1,0 +1,2098 @@
+Towards Optimal Statistical Watermarking
+Baihe Huang*
+Hanlin Zhu†
+Banghua Zhu‡
+Kannan Ramchandran §
+Michael I. Jordan¶
+Jason D. Lee||
+Jiantao Jiao**
+Abstract
+We study statistical watermarking by formulating it as a hypothesis testing problem,
+a general framework which subsumes all previous statistical watermarking methods.
+Key to our formulation is a coupling of the output tokens and the rejection region,
+realized by pseudo-random generators in practice, that allows non-trivial trade-offs
+between the Type I error and Type II error. We characterize the Uniformly Most
+Powerful (UMP) watermark in the general hypothesis testing setting and the minimax
+Type II error in the model-agnostic setting. In the common scenario where the output
+is a sequence of n tokens, we establish nearly matching upper and lower bounds on
+the number of i.i.d. tokens required to guarantee small Type I and Type II errors. Our
+rate of Θ(h−1 log(1/h)) with respect to the average entropy per token h highlights
+potentials for improvement from the rate of h−2 in the previous works. Moreover,
+we formulate the robust watermarking problem where the user is allowed to perform
+a class of perturbations on the generated texts, and characterize the optimal Type
+II error of robust UMP tests via a linear programming problem. To the best of our
+knowledge, this is the first systematic statistical treatment on the watermarking problem
+with near-optimal rates in the i.i.d. setting, which might be of interest for future works.
+1
+Introduction
+The prevalence of large language models (LLMs) in recent years makes it challenging and
+important to detect whether a human-like text is produced by the LLM system (Kirchenbauer
+et al., 2023a; Kuditipudi et al., 2023; Christ et al., 2023; Yoo et al., 2023; Fernandez et al.,
+*baihe_huang@berkeley.edu. University of California, Berkeley.
+†hanlinzhu@berkeley.edu. University of California, Berkeley.
+‡banghua@berkeley.edu. University of California, Berkeley.
+§kannanr@berkeley.edu. University of California, Berkeley.
+¶jordan@cs.berkeley.edu. University of California, Berkeley.
+||jasonlee@princeton.edu. Princeton University.
+**jiantao@eecs.berkeley.edu. University of California, Berkeley.
+1
+arXiv:2312.07930v3  [cs.LG]  6 Feb 2024
+
+2023; Fu et al., 2023; Wang et al., 2023; Yang et al., 2023; Liu et al., 2023; Zhao et al.,
+2023; Koike et al., 2023). On the one hand, some of the most advanced LLMs to date,
+such as GPT-4 (OpenAI, 2023a), are good at producing human-like texts, which might
+be hard to distinguish from human-generated texts even for humans in various scenarios.
+On the other hand, it is important to keep human-produced text datasets separated from
+machine-produced texts in order to avoid the spread of misleading information (Vincent,
+2022) and the contamination of training datasets for future language models (Kuditipudi
+et al., 2023).
+To detect machine-generated content, a recent line of work (Kirchenbauer et al., 2023a;
+Kuditipudi et al., 2023; Christ et al., 2023) proposes to inject statistical watermarks, a signal
+embedded within the generated texts which reveals the generation source, into texts. As
+discussed in Kuditipudi et al. (2023), there are three desirable properties of watermarking:
+1. distortion-free: the watermark should not alert the distribution of the generated texts;
+2. agnostic: the detector should not know the language model or the prompt; 3. robust:
+the detector should be able to detect the watermark even under slight perturbation of the
+generated texts. However, previously proposed methods are either heuristic or guaranteed
+by different, sub-optimal mathematical descriptions of the above properties, making it
+difficult to systematically evaluate the watermarking schemes and to draw useful statistical
+conclusions.
+Motivated by this, we propose a unifying formulation of statistical watermarking based
+on hypothesis testing, and study the trade-off between the Type I error and the Type II error.
+More specifically, our contributions are summarized as follows:
+• We formulate statistical watermarking as a hypothesis testing problem with a random
+rejection region, and specify model-agnostic watermarking, where the distribution of
+the rejection region is independent of the underlying model distribution, as a notion
+highly practical in real-world applications.
+• We find the optimal Type II error among all level-α tests and explicitly characterize
+the most powerful watermarking scheme that achieves it. For model-agnostic water-
+marking, we construct the optimal distribution of the reject region and establish the
+minimax increase in Type II error in comparison to the most powerful watermarking
+schemes.
+• In the context where the sample is a sequence of many i.i.d. tokens, we provide
+nearly-matching upper and lower bounds for the minimum number of tokens required
+to guarantee small type I and type II errors. Our rate h−1 log(1/h) improves upon
+previous works featuring a rate of h−2, in terms of h — the average entropy of per
+generated tokens.
+• Additionally, we formulate a robust watermarking problem where the watermarking
+scheme is robust to a class of perturbations that the user can employ to the outputs. In
+this setting, we also characterize the optimal type II error and the construction of the
+robust watermarking scheme via a linear program.
+2
+
+1.1
+Related works
+Watermarking is a powerful white-box method for detecting LLM-generated texts (Tang
+et al., 2023). Watermarks can be injected either into a pre-existing text (edit-based water-
+marks) or during the text generation (generative watermarks). Our work falls in the latter
+category. Edit-based watermarking (Rizzo et al., 2019; Abdelnabi & Fritz, 2021; Yang
+et al., 2022; Kamaruddin et al., 2018) has been the focus of several studies in the past. The
+concept of generative watermarking dates back to the work of Venugopal et al. (2011), while
+our work is more relevant to a recent line of works (Aaronson, 2022a; Kirchenbauer et al.,
+2023a; Kuditipudi et al., 2023; Christ et al., 2023) that introduce statistical signals into text
+generation. Specifically, Kirchenbauer et al. (2023a) increases the probability that tokens
+are chosen from a randomly sampled ‘green’ list; Aaronson (2022a) selects the token i that
+maximizes keys randomly sampled from exponential distributions with mean 1/pi; Christ
+et al. (2023) samples the tokens by solving the optimal transport from uniform distribution
+in [0, 1]; Kuditipudi et al. (2023) introduces inverse transform sampling as a distortion-free
+watermarking method; Zhao et al. (2023) proposes a simplified variation of Kirchenbauer
+et al. (2023a) where a fixed Green-Red split is used consistently. These watermarks are
+evaluated in the benchmark of Piet et al. (2023).
+Statistical watermarking techniques share the similarity that the outputs are correlated
+with some secret keys (which could come from either external randomness or internal
+hashing), thereby coupling the rejection region and the outputs in the hypothesis testing.
+This fact is recognized by recent works of Kuditipudi et al. (2023); Zhao et al. (2023), where
+model-agnosticism in the detection phase is also emphasized. The exponential scheme
+in Aaronson (2022b), the inverse transform sampling scheme in Kuditipudi et al. (2023),
+and the binary scheme in Christ et al. (2023) come with theoretical guarantees that (i)
+the watermarked model distribution cannot be distinguished from the original distribution
+(called undetectability (Christ et al., 2023) or distortion-freeness (Kuditipudi et al., 2023)),
+and (ii) the outputs from the watermarked models are statistically detectable as long as the
+entropy is lower bounded. In contrast, Kirchenbauer et al. (2023a) is not distortion-free,
+nonetheless enjoying little degradation in generation quality and provable detectability (Zhao
+et al., 2023) with suitable parameter choice of the bias parameter (logits increase δ in the
+‘green’ list). Despite the aforementioned theoretical efforts in establishing guarantees for
+existing watermarks, the fundamental tradeoff in this hypothesis testing problem and the
+rates on the required number of generated tokens remain unsolved.
+Watermarks can also be injected with private forgeability and public verifiability (Fairoze
+et al., 2023), hence functioning effectively as digital signatures. Meanwhile, various attack
+algorithms against watermarking schemes were also studied (Kirchenbauer et al., 2023a,b;
+Sato et al., 2023; Zhang et al., 2023; Kuditipudi et al., 2023). These attacking schemes
+apply quality-preserving perturbations to the watermarked outputs in delicate ways, and
+are therefore modelled by the perturbation graph (Definition 4.1) in the robust watermark
+framework in Section 4. With the success of various attacking methods, robustness becomes
+an important consideration in watermarking techniques. However, Zhang et al. (2023)
+3
+
+proves that it is only feasible to achieve robustness to a well-specified set of attacks, instead
+of all. This fact aligns with our Theorem 4.4, which characterizes the fundamental limits of
+robust watermarking under different attacking powers.
+1.2
+Notation
+Define (x)+ := max{x, 0}, x ∧y := min{x, y}, x ∨y = max{x, y}. For any set A, we
+write Ac as the complement of set A, |A| as its cardinality, and 2A := {B : B ⊂A} as the
+power set of A. We use notations g(n) = O (f(n)), g(n) = Ω(f(n)), and g(n) = Θ (f(n))
+to denote that there exists numerical constants C1, c2, C3, c4 such that for all n > 0: g(n) ≤
+C1 · f(n), g(n) ≥c2 · f(n), and c4 · f(n) ≤g(n) ≤C3 · f(n), respectively. Throughout,
+we use ln to denote natural logarithm.
+The total variation (TV) distance between two probability measures µ, ν is denoted
+by TV(µ∥ν). We use supp(µ) to denote the support of a probability measure ρ. Given a
+sample space Ω, let ∆(Ω) denote the set of all probability measures over Ω(take the discrete
+σ-algebra). We write δx as the Dirac measure on x, i.e., δx(A) =
+(
+1,
+x ∈A
+0,
+x /∈A. A coupling
+for two distributions (i.e. probability measures) is a joint distribution of them.
+2
+Watermarking as a Hypothesis Testing Problem
+In the problem of statistical watermarking, a service provider (e.g., a language model
+system), who possesses a distribution ρ over a sample space Ω, aims to make the samples
+from the service provider distinguishable by a detector, without changing ρ. The service
+provider achieves this by sharing a watermark key (generated from a distribution that is
+coupled with ρ) with the detector, with the goal of controlling both the Type I error (an
+independent output is falsely detected as from ρ) and the Type II error (an output from ρ
+fails to be detected). This random key together with the detection rule constitute a (random)
+rejection region. In the following, we formulate this problem as hypothesis testing with
+random rejection regions.
+Problem 2.1 (Watermarking). Fix ϵ ≥0. Given a probability measure ρ over sample
+space Ω1, an ϵ-distorted watermarking scheme of ρ is a probability measure P (a joint
+probability of the output X and the rejection region R) over the sample space Ω⊗2Ωsuch
+that TV(P(·, 2Ω)∥ρ) ≤ϵ, where P(·, 2Ω) is the marginal probability of X over Ω. In the
+generation phase, the service provider samples (X, R) from P, provides the output X to the
+service user, and sends the rejection region R to the detector.
+In the detection phase, a detector is given a tuple (X, R) ∈Ω⊗2Ωwhere X is sampled
+from an unknown distribution and R, given by the service provider, is sampled from the
+1Throughout we will assume that Ωis discrete, as in most applications.
+4
+
+marginal probability P(Ω, ·) over 2Ω. The detector is tasked with using R to conduct a
+hypothesis test that involves two competing hypotheses:
+H0 : X is sampled independently from R,
+versus H1 : (X, R) is sampled from the joint distribution P.
+The Type I error of P, defined as α(P) := supπ∈∆(Ω) PY ∼π,(X,R)∼P(Y ∈R), is the maxi-
+mum probability that an independent sample Y is falsely rejected. The Type II error of P,
+defined as β(P) := P(X,R)∼P(X /∈R), is the probability that the sample (X, R) from the
+joint probability P is not detected.
+1
+2
+Detector f
+ f(
+1 
+reject
+) =
+ f(
+2 
+accept
+) =
+Detection 
+Phase
+Generation 
+Phase
+Watermarked Model
+Any Other Model
+Figure 1: Illustration of watermarking in practice.
+A few remarks are in order.
+Remark 2.2 (Difference between
+classical hypothesis testing). In
+classical hypothesis testing, the re-
+jection region is often nonrandom-
+ized or independent from the test
+statistics. However, in watermark-
+ing problem, the service provider
+has the incentive to facilitate the
+detection. The key insight is that
+P is a coupling of the random out-
+put X and the random rejection
+region R, so that X ∈R occurs
+with a high probability (low Type
+II error), while any independent
+sample Y lies in R with a low prob-
+ability (low Type I error).
+Remark 2.3 (Implementation). In fact, it is imperative for the detector to observe the
+rejection region that is coupled with the output: otherwise, the output from the service
+provider and another independent output from the same marginal distribution would be
+statistically indistinguishable.
+In practice, the process of coupling and sending the rejection region can be implemented
+by cryptographical techniques: the service provider could hash a secret key sk, and use
+pseudo-random functions F1, F2 to generate (X, R) = (F1(sk), F2(sk)). Now it suffices
+to send the secret key to the detector, who can then reproduce the reject region using the
+pseudo-random function F2. This process is illustrated in Figure 1.
+By introducing the coupled and random rejection region, we abstract away the minutiae
+of cryptographical implementations, therefore allowing us to focus solely on the statistical
+trade-offs.
+For practical applications, it is additionally desirable for watermarking schemes to be
+model-agnostic, i.e, the marginal distribution of the rejection region is irrelevant to the
+5
+
+watermarked distribution. Recall from Remark 2.3 that in practice, detectors usually adopt
+a pseudo-random function to generate the reject region from the shared secret keys. If the
+watermarking scheme P depends on the underlying distribution ρ, then the pseudo-random
+function, and effectively the detector, need to know ρ. On the other hand, model-agnostic
+watermarking enables the detector to use a fixed, pre-determined pseudo-random function
+to generate the reject region, and hence perform hypothesis-testing without the knowledge
+of the underlying model that generates the output. This is an important property enjoyed
+by existing watermarks (Aaronson, 2022b; Kirchenbauer et al., 2023a; Christ et al., 2023;
+Kuditipudi et al., 2023). Therefore in the following, we formulate model-agnostic within
+our hypothesis testing framework.
+Problem 2.4 (Model-Agnostic Watermarking). Given a sample space Ωand a set Q ⊂∆(Ω),
+a Q-watermarking scheme is a tuple (η, {Pρ}ρ∈Q) where η is a probability measure over 2Ω,
+such that for any probability measure ρ ∈Q, Pρ is a distortion-free watermarking scheme
+of ρ and its marginal distribution over 2Ω, Pρ(Ω, ·), equals η(·).
+A model-agnostic watermarking scheme is a ∆(Ω)-watermarking scheme.
+Remark 2.5 (Information of the model). A Q-watermarking scheme can be interpreted as a
+way to watermark all distributions in the set Q while revealing no information of the model
+used to generate the output other than the membership inside Q (i.e., observing the rejection
+region, one is only able to infer that the output comes from a model in Q, but is unable to
+know which exactly the model is). By letting Q be ∆(Ω), model-agnostic watermarking thus
+reveals no information of the model.
+2.1
+Examples
+In the following examples, we show how existing watermarking schemes fit in our frame-
+work.
+Example 2.6 (Text Generation with Soft Red List, Kirchenbauer et al. (2023a)). In Al-
+gorithm 2 of Kirchenbauer et al. (2023a), the watermarking scheme (over sample space
+Ω= V ∗where V is the ‘vocabulary’, i.e., the set of all tokens) of ρ is given as follows:
+• Fix threshold C ∈R, green list size γ ∈(0, 1), and hardness parameter δ > 0
+• For i = 1, 2, . . .
+– Randomly partition V into a green list G of size γ|V |, and a red list R of size
+(1 −γ)|V |.
+– Sample the token Xi from the following distribution from P where P(Xi = x) =
+(
+ρ(x)·exp(δ)
+P
+x∈G ρ(x)·exp(δ)+P
+x∈R ρ(x),
+if x ∈G
+ρ(x)
+P
+x∈G ρ(x)·exp(δ)+P
+x∈R ρ(x),
+if x ∈R
+6
+
+• Let the rejection region R be
+{X ∈Ω: the number of green list tokens in X ≥C} .
+The above sampling procedures as a whole define the joint distribution of the output
+X = X1X2 · · · and the rejection region R, i.e., the Θ(δ)-distorted watermarking scheme
+PSOFTREDLIST. The detector observes the rejection region via the secret key that the service
+provider uses to generate the green and red lists.
+Example 2.7 (Complete watermarking algorithm Waksk, Christ et al. (2023)). In Algorithm
+3 of Christ et al. (2023), the watermarking scheme (over sample space Ω= {0, 1}∗) of ρ is
+given as follows:
+• Fix threshold C ∈R and entropy threshold λ > 0
+• Select i such that the empirical entropy of X1X2 . . . Xi is greater than or equal to λ
+• For j = i + 1, i + 2, . . .
+– Sample uj ∈[0, 1] uniformly at random.
+– Let the binary token Xj be given by Xj =
+(
+1,
+if uj ≤ρ(1|X1, . . . , Xj−1)
+0,
+otherwise
+.
+• Let the rejection region R be given by
+(
+X :
+L
+X
+j=i+1
+log
+1
+Xjuj + (1 −Xj)(1 −uj) ≥C
+)
+.
+The above sampling procedures as a whole define the joint distribution of the output
+X = X1X2 · · · and the rejection region R, i.e., the 0-distorted watermarking scheme
+PWaksk.The detector observes the rejection region via the index i and uj(j > i).
+Example 2.8 (Inverse transform sampling WakITS, Kuditipudi et al. (2023)). The inverse
+transform sampling scheme in Christ et al. (2023) (over sample space Ω= [N]∗) of ρ is
+given as follows:
+• Fix threshold C ∈R, resample size T, and block size k
+• For j = 1, 2, . . . ,
+– Let µ ←ρ(·|X1, . . . , Xj−1).
+– Sample ξj = (uj, πj), ξ(t)
+j
+= (u′
+j, π′
+j) (t = 1, . . . , T) i.i.d. according to the
+following distribution:
+* Sample u ∈[0, 1] uniformly at random;
+* Sample π uniformly at random from the space of permutations over the
+vocabulary [N].
+7
+
+– Let the token Xj be given by
+π−1 (min{π(i) : µ({j : π(j) ≤π(i)}) ≥u}) .
+• Let the rejection region R be
+R =
+(
+X : 1 + PT
+t=1 1
+ ϕ(X, ξ(t)) ≤ϕ(X, ξ)
+
+T + 1
+≤C
+)
+where ξ = (ξ1, . . . , ξlen(X)), ξ(t) = (ξ(t)
+1 , . . . , ξ(t)
+len(X)), and ϕ(y, ξ) is given by
+min
+i=1,...,len(y)−k+1,
+j=1,...,len(ξ)
+
+d
+ {yi+l}k−1
+l=1 , {ξ(j+l)%len(ξ)}k−1
+l=1
+	
+Here d is an alignment cost, set as d(y, (u, π)) = Plen(y)
+i=1
+ui −πi(yi)−1
+N−1
+ in Kuditipudi
+et al. (2023). Additionally, a single permutation π (∀j, t) is used to reduce computation
+overhead. The above sampling procedures as a whole define the joint distribution of the
+output X = X1X2 · · · and the rejection region R in WakITS.The detector observes the
+rejection region via ξ, ξ′.
+Using similar approaches as in the above examples, we can encompass the methods of a
+number of works (Aaronson, 2022b; Liu et al., 2023; Zhao et al., 2023; Kuditipudi et al.,
+2023) into our framework.
+3
+Statistical Limit in Watermarking
+3.1
+Rates under the general setting of Problem 2.1
+Given the formulation of statistical watermarking, it is demanding to understand its statistical
+limit. In this section, we study the following notion of Uniformly Most Powerful (UMP) test,
+i.e., the watermarking scheme that achieves the minimum achievable Type II error among
+all possible tests with Type I error ≤α.
+Definition 3.1 (Uniformly Most Powerful Watermark). A watermarking scheme P is
+called Uniformly Most Powerful (UMP) ϵ-distorted watermark of level α, if it achieves the
+minimum achievable Type II error among all ϵ-distorted watermarking with Type I error
+≤α.
+The following result gives an exact characterization of the UMP watermark and its Type
+II error.
+Theorem 3.2. For probability measure ρ, the Uniformly Most Powerful ϵ-distorted water-
+mark of level α, denoted by P∗, is given by
+P∗(X = x, R = R0) =
+
+
+
+
+
+
+
+ρ∗(x) ·
+
+1 ∧
+α
+ρ∗(x)
+
+,
+R0 = {x}
+ρ∗(x) ·
+
+1 −
+α
+ρ∗(x)
+
++ ,
+R0 = ∅
+0,
+else
+8
+
+where ρ∗= arg minTV(ρ′∥ρ)≤ϵ
+P
+x∈Ω:ρ′(x)>α (ρ′(x) −α) . Its Type II error is given by
+min
+TV(ρ′∥ρ)≤ϵ
+X
+x∈Ω:ρ′(x)>α
+(ρ′(x) −α) ,
+and when |Ω| ≥1
+α it simplifies to
+
+
+X
+x∈Ω:ρ(x)>α
+(ρ(x) −α) −ϵ
+
+
++
+.
+(1)
+The key insight for proving Theorem 3.2 is that maximizing Type II error over level α
+can be written as a linear program over the coupling distribution P. The detailed proof is
+deferred to Appendix A. In the following, we make a few remarks on Theorem 3.2.
+Remark 3.3 (Dependence on distortion parameter ϵ). As seen from the theorem, when a
+larger distortion parameter ϵ is allowed, the Type II error would decrease. This aligns with
+the intuition that adding statistical bias would make the output easier to detect (Aaronson,
+2022a; Kirchenbauer et al., 2023a). Among all choices of ϵ, the case ϵ = 0 is of partic-
+ular interest since it preserves the marginal distribution of the service provider’s output.
+Therefore, we will focus on this distortion-free case in the following sections.
+Remark 3.4 (Intuition behind P∗). Recall that in practice, the watermarks are implemented
+via pseudo-random functions. Therefore, the uniformly most powerful test in Theorem 3.2 is
+effectively using a pseudo-random generator to approximate the distribution ρ, combined
+with an α-clipping to control Type I error. This construction reveals a surprising message:
+simply using pseudo-random generator to approximate the distribution is optimal.
+Remark 3.5 (Watermarking guarantees). To achieve the upper bound of Theorem 3.2, the
+detector needs to access the model and the prompt in order to generate the reject region,
+which is not always accessible in many real-world applications. Therefore, the upper
+bound of Theorem 3.2 achieves a weaker watermarking guarantee compared with previous
+works (Aaronson, 2022a; Kirchenbauer et al., 2023a; Christ et al., 2023). In Section 3.2,
+we study model-agnostic watermarking that overcomes this limitation.
+Nonetheless, the lower bound in Theorem 3.2 characterizes a fundamental limit of
+Problem 2.1, thus providing an information-theoretic lower bound for all watermarks.
+Remark 3.6 (Implementation). To implement the UMP watermark using a predetermined
+key, one may apply the key to the random seeds used in model generation, and sets the
+reject region to be the output with probability 1 ∧
+α
+ρ∗(x). To implement the UMP watermark
+without the detector’s knowledge on the secret key, one could hash the first few tokens to
+seed the pseudo-random function. In summary, the UMP watermark could use the same key
+to watermark many outputs, and the key needs not to be generated at the same time as the
+output itself.
+Remark 3.7 (Use cases of the UMP watermark). The utilization of the UMP watermark of-
+fers an efficient approach for (language model) service providers to determine if instruction-
+9
+
+following datasets have been generated by a specific model. In the context of instruction-
+following datasets, both the prompt and response are explicitly provided to the detectors,
+enabling the UMP watermark to perform accurate watermarking and detection without
+extra source of information. This usage is beneficial in identifying and filtering out data
+points that have been comtaminated by texts generated from models like GPT-4 (OpenAI,
+2023b), thereby preserving the purity and quality of the training data.
+Remark 3.8 (Dependence on the randomness of ρ). If ρ is deterministic, the Type II error
+P
+x∈Ω:ρ(x)>α (ρ(x) −α) −ϵ
+
++ reduces to 1 −α −ϵ and shows limited practical utility of
+statistical watermarking. This is expected since when the service provider deterministically
+outputs z, it would be impossible to distinguish the watermark distribution with an indepen-
+dent output from δz. In general, Theorem 3.2 implies that the Type II error decreases when
+the randomness in ρ increases, matching the reasoning in previous works Aaronson (2022a);
+Christ et al. (2023).
+3.2
+Rates of model-agnostic watermarking
+It is noticeable that for large Q, a Q-watermarking scheme can not perform as good as
+a watermarking specifically designed for ρ for any distribution ρ ∈Q. This means that
+Uniformly Most Powerful Q-Watermarking might not exist in general. To evaluate model-
+agnostic watermarking schemes, a natural desideratum is therefore the maximum difference
+between its Type II error and the Type II error of the UMP watermarking of ρ over all
+distributions ρ, under fixed Type I error. Specifically, we introduce the following notion.
+Definition 3.9 (Minimax most powerful model-agnostic watermark). We say that a Q-
+agnostic watermark (η, {Pρ}ρ∈Q) is of level-α if the Type I error of Pρ is less than or equal
+to α for any ρ ∈Q. Define the maximum Type II error loss of (η, {Pρ}ρ∈Q) as
+γ(η) := sup
+ρ∈Q
+β(Pρ) −β(P∗
+ρ)
+where P∗
+ρ is the UMP distortion-free watermark of ρ.
+We say that a Q-agnostic watermarking scheme is minimax most powerful, if it mini-
+mizes the maximum Type II error loss among all Q-agnostic watermarks of level α.
+The following result characterizes the Type II error loss of the minimax most powerful
+model-agnostic watermarking.
+Theorem 3.10. Let |Ω| = n and suppose αn, 1
+α ∈Z2. In the minimax most powerful
+model-agnostic watermarking scheme of level-α, the marginal distribution of the reject
+2For the general case, it suffices to let a1 = 1/(⌈1/α⌉) and n1 = ⌈α1n⌉/α1 and augment Ωwith n1 −n
+dummy outcomes. Then α1n, 1/α1 ∈Z and hence the minimax bound for the new sample space with
+cardinality n1 and the new Type I error α1 yields a nearly-matching bound for (n, α).
+10
+
+region is given by
+η∗(A) =
+(
+1
+( n
+αn),
+if |A| = αn
+0,
+otherwise
+.
+The maximum Type II error loss of the minimax most powerful model-agnostic watermarking
+scheme of level-α is given by γ(η∗) = (n−1
+α
+αn )
+( n
+αn) . In the regime α →0+, n →+∞, we have
+γ(η∗) →c for some constant c ≤e−1, and when 1/(αn) →0+ is further satisfied, c = e−1.
+The theorem establishes existence of Pρ for any ρ without explicit construction. To
+grasp this concept, consider three sets: U, the output space; V , the set of reject regions;
+and W, the subset of U × V defined by {(u, v) : u ∈v}. Notice that the type II error is
+essentially 1 −Pρ(W). Therefore, our objective is to establish existence of a probability
+measure P over U × V such that its marginal distributions align with η and ρ, respectively,
+and the probability assigned to W, denoted as P(W), meets a certain lower bound. This
+is the question studied by Strassen’s theorem (Strassen, 1965), which stipulates conditions
+for the existence of such a measure. Hence, by verifying Strassen’s conditions, we confirm
+the existence of the required measure without the necessity of explicitly constructing the
+coupling. We defer the detailed proof to Appendix C.
+Remark 3.11. Theorem 3.10 implies that for any distribution ρ, the Type II error of model-
+agnostic watermark is upper bounded by (n−1
+α
+αn )
+( n
+αn) + P
+x:ρ(x)≥α(ρ(x) −α). The convergence
+γ(η∗) →e−1 implies that the minimax optimal model-agnostic watermark exhibits an
+increase in Type II error by an additive factor of e−1 compared to the UMP watermark in
+the worst-case scenario.
+Remark 3.12. The e−1 maximum Type II error loss does not contradict with the h−2 rates
+in previous works (Aaronson, 2022a; Christ et al., 2023; Kuditipudi et al., 2023), because
+as n ≳h−2, the model distribution (of the sequences of n tokens with average entropy h per
+token) is beyond the worst case. Indeed, such distributions have higher differential entropy
+than the hard instances in the proof.
+Remark 3.12 highlights that the hard instance constructed in Theorem 3.10 may possess
+a lower entropy than that of the actual model. Therefore, it raises an important question:
+for a smaller class Q that contains distributions with higher entropy, what is the minimum
+achievable Type II error loss for Q-agnostic watermarking? It is obvious that the minimax
+rate over a higher entropy level should improve upon the previous rate of e−1.
+Towards answering this question, we consider the following class of distributions:
+Qκ :=
+
+ρ : sup
+ω∈Ω
+ρ({ω}) ≤κ
+
+where κ represents the level of randomness and decreases as entropy increases. The
+maximum Type II error loss of Qκ-agnostic watermarking (η, {Pρ}ρ∈Qκ) is thus given by
+γ(η, κ) :=
+max
+ρ∈∆(Ω):supω∈Ωρ({ω})≤κ β(Pρ) −β(P∗
+ρ)
+11
+
+where P∗
+ρ is the UMP distortion-free watermark of ρ. The following result gives an upper
+bound of the above quantity, thus answering the question.
+Theorem 3.13. Let |Ω| = n and suppose αn, 1
+κ ∈Z. Then the maximum Type II error loss
+of the minimax Qκ-agnostic watermarking of level-α is upper bounded by
+γ(η∗, κ) ≤
+ n−αn
+1/κ
+
+  n
+1/κ
+ .
+The proof can be found in Appendix D. When κ ≤α, the bound (n−αn
+1/κ )
+( n
+1/κ) improves over
+e−1. In the next section, we will apply Theorem 3.13 to the i.i.d. setting where κ can
+be exponentially small. This will lead to an negligible maximum Type II error loss for
+model-agnostic watermarking.
+3.3
+Rates in the i.i.d. setting
+In practice, the sample space Ωis usually a Cartesian product in the form of Ω⊗n
+0 . For
+example, in large language models, the output takes form of a sequence of tokens, each
+coming from the same vocabulary set V . The quantity of practical interest becomes the
+minimum number of tokens to achieve certain statistical watermarking guarantee. This
+demands specializing and transferring the results from Theorem 3.2 and Theorem 3.13 to
+deal with distributions in product measureable spaces, and finding the explicit rates of the
+minimum number of required tokens.
+In this section, we consider the product distribution ρ = ρ⊗n
+0
+over Ω⊗n
+0
+and the important
+setting of ϵ = 0 (distortion-free watermarking). We introduce the following two quantities:
+• Let h denote the entropy of ρ0. We use nump(h, α, β) to denote the minimum number
+of tokens required by the UMP watermark to achieve Type I error ≤α and Type II
+error ≤β.
+• Define nminmax(h, α, β) as the number of tokens required by minimax Qh-agnostic
+watermark to achieve Type I error ≤α and Type II error ≤β, where Qh :=
+
+ρ = ρ⊗n
+0
+: H(ρ0) ≥h
+	
+, i.e. contains all distributions ρ = ρ⊗n
+0
+such that the en-
+tropy of ρ0 is ≥h.
+Together, nump(h, α, β) and nminmax(h, α, β) serve as critical thresholds beyond which the
+desired statistical conclusions can be drawn regarding the output, making them essential
+parameters in watermarking applications.
+We start by inspecting the rates in Theorem 3.2 in the i.i.d. setting. The following result
+gives a nearly-matching upper bound and lower bound of nump(h, α, β).
+Theorem 3.14. Suppose α, β < 0.1. We have
+nump(h, α, β) ≥O
+
+
+
+
+ln 1
+h
+
+ln 1
+α ∧ln 1
+β
+
+h
+
+∨ln 1
+α
+h
+
+.
+12
+
+Furthermore, let k = |Ω0|, we have
+nump(h, α, β)
+≤Ω
+
+
+
+
+ln k
+h ·
+
+ln 1
+α ∧ln 1
+β
+
+h
+
+∨ln 1
+α ln k
+h
+
+.
+Remark 3.15 (Tightness). Up to a constant and logarithmic factor in k, our upper bound
+matches the lower bound. Notice that since any model with an arbitrary token set can be
+reduced into a model with a binary token set (Christ et al., 2023) (i.e. k = 2), our bound is
+therefore tight up to a constant factor.
+Using Theorem 3.13 and Theorem 3.14, we are now in the position to characterize
+nminmax(h, α, β). Suppose the sample space is a Cartesian product Ω= Ω⊗n0
+0
+and constrain
+to product measures over sequences of n0 tokens, like in Section 3.3. We start by the
+following relationship:3
+1 −
+max
+ρ0:H(ρ0)≥h max
+ω∈Ω0 ρ0({ω}) ≥Ω
+
+h
+ln(1/h)
+
+where a detailed derivation can be found in Lemma B.3. It follows that
+κ ≤
+
+max
+ρ0:H(ρ0)≥h max
+ω∈Ω0 ρ0({ω})
+n0
+= e−Ω(
+n0h
+ln(1/h)).
+Using this observation and the derivation in Theorem 3.10, γ(η∗, κ) can be bounded by
+(1 −α)1/κ ≤(1 −α)e
+Ω(
+n0h
+ln(1/h)).
+This means that when n0 ≳
+ln(1/h)
+h
+· (ln(1/α) + ln(1/β)), the maximum Type II error
+loss given by Theorem 3.13 and the Type II error of the UMP watermarking given in
+Theorem 3.14 can be simultaneously bounded by β, thus establishing an upper bound.
+Furthermore, this rate matches the lower bound in Theorem 3.14, where the guarantee is
+weaker (model-nonagnostic). Combining the above arguments, the following result is thus
+immediate.
+Corollary 3.16. Suppose α, β < 0.1. We have
+nminmax(h, α, β) = Θ
+ln(1/h)
+h
+· (ln(1/α) + ln(1/β))
+
+.
+Remark 3.17 (Comparison with previous works). As commented in Remark 3.8, the regime
+h ≪1 is more important and challenging because it is the scenario where watermarking
+is difficult. In this regime, our rate of ln(1/h)
+h
+improves the previous rate of h−2 in a line of
+works (Aaronson, 2022a; Kirchenbauer et al., 2023a; Zhao et al., 2023; Liu et al., 2023;
+Kuditipudi et al., 2023), and highlights a fundamental gap between the existing watermarks
+and the information-theoretic lower bound.
+3In the rest of this section, we omit logarithmic factors in the cardinality of the vocabulary.
+13
+
+4
+Robust Watermarking
+In the context of watermarking large language models, it’s crucial to acknowledge users’
+capability to modify or manipulate model outputs. These modifications include cropping,
+paraphrasing, and translating the text, all of which may be employed to subvert watermark
+detection. Therefore, in this section, we introduce a graphical framework, modified from
+Problem 2.1, to account for potential user perturbations and investigate the optimal water-
+marking schemes robust to these perturbations. The formulation here shares similarity with
+a concurrent work by Zhang et al. (2023).
+Definition 4.1 (Perturbation graph). A perturbation graph over the discrete sample space Ω
+is a directed graph G = (V, E) where V equals Ωand (u, u) ∈E for any u ∈V . For any
+v ∈V , let in(v) = {w ∈V : (w, v) ∈E} denote the set of vertices with incoming edges to
+v, and let out(v) = {w ∈V : (v, w) ∈E} denote the set of vertices with outcoming edges
+from v.
+The perturbation graph specifies all the possible perturbations that could be made by the
+user: any u ∈V can be perturbed into v ∈V if and only if (u, v) ∈E, i.e., there exists a
+directed edge from u to v.
+Example 4.2. Consider Ω= Ω⊗n
+0 . Let the user have the capacity to change no more
+than c tokens, i.e., perturb any sequence of tokens x = x1x2 · · · xn to another sequence
+y = y1y2 · · · yn with Hamming distance less than or equal to c. Then the perturbation graph
+is given by G = (V, E) where V = Ωn and E = {(u, v) : u, v ∈V, d(u, v) ≤c} (d is the
+Hamming distance, i.e., d(x, y) = Pn
+i=1 1(xi ̸= yi)).
+Problem 4.3 (Robust watermarking scheme). A robust watermarking scheme with respect
+to a perturbation graph G is a watermarking scheme except that its Type II error is defined as
+EX,R∼P
+
+maxY ∈out(X) 1(Y /∈R)
+
+, i.e., the probability of false negative given that the user
+adversarially perturbs the output.
+The next result characterize the optimum Type II error achievable by robust watermark-
+ing, where the proof can be found in Appendix E.
+Theorem 4.4. Define the shrinkage operator SG : 2Ω→2Ω(of a perturbation graph G)
+by SG(R) = {x ∈Ω: out(x) ⊂R} and its inverse S−1
+G (R) = ∪x∈Rout(x). Then the
+minimum Type II error of the robust, 0-distorted UMP test of level α in Problem 4.3 is given
+by the solution of the following Linear Program
+min
+x∈R|Ω| 1 −
+X
+y∈Ω
+ρ(y)x(y)
+(2)
+s.t.
+X
+y∈in(z)
+ρ(y)x(y) ≤α,
+X
+z∈Ω
+x(z) ≤1,
+0 ≤x(z) ≤1, ∀z ∈Ω.
+14
+
+Scheme / Temperature
+0
+0.3
+0.7
+1
+Distribution Shift (Kirchenbauer et al., 2023a)
+65
+63
+77
+136
+Exponential (Aaronson, 2022b)
+impossible
+890
+190
+93
+Inverse Transform (Kuditipudi et al., 2023)
+impossible
++∞
+434
+222
+Binary (Christ et al., 2023)
+impossible
++∞
++∞
+386
+Ours
+impossible
+60.5
+24
+15
+Table 1: Comparison of our watermark scheme (in the model non-agnostic setting) to
+previous works tested on the MARKMYWORDS benchmark by (Piet et al., 2023). For each
+watermark scheme and each temperature, we show the (average) minimum number of tokens
+needed to detect the watermark under the constraint that type I error is less than α = 0.02.
+For the first four rows, one can refer to Figure 1 of Piet et al. (2023); +∞means over
+half of all generations are not watermarked and “impossible” means when the temperature
+is 0, the text generation procedure is deterministic and the entropy is zero, and thus any
+distortion-free watermark scheme does not work.
+The UMP watermarking is given by P∗(X = y, R = R0)
+=
+
+
+
+
+
+ρ(y) · x∗(y),
+R0 = S−1
+G ({y})
+ρ(y) · (1 −x∗(y)) ,
+R0 = ∅
+0,
+otherwise
+where x∗is the solution of Eq. (2).
+Remark 4.5 (Dependence on the sparsity of graph). From Eq. (2), we observe that the
+perturbation graph influence the optimal Type II error via the constraint set. Indeed, if the
+graph is dense, the constraints P
+y∈in(z) ρ(y)x(y) ≤α involve many entries of y ∈Ωand
+thus decrease the value P
+y∈Ωρ(y)x(y), thereby increasing the Type II error. On the other
+extreme, when the edge set of the perturbation graph is E = {(u, u) : u ∈v}, i.e., the user
+can not perturb the output to a different value, then optimum of Eq. (2) reduces to Eq. (1)
+(setting ϵ = 0).
+5
+Experiments
+In this section, we show experimental results comparing our watermark scheme to several
+previous works. We test our watermark scheme on the MARKMYWORDS benchmark
+by Piet et al. (2023). Table 1 shows the average number of tokens needed to detect the
+watermark for five different watermark schemes under different temperatures on the MARK-
+MYWORDS benchmark. We choose Llama2-7B-chat (Touvron et al., 2023) as the model to
+be watermarked and enforce that the type I error is less than α = 0.02.
+Table 1 shows that our watermark scheme needs significantly fewer tokens to detect the
+watermark in the model non-agnostic setting, which provides strong empirical evidence
+15
+
+that our watermark scheme is statistically optimal (Theorem 3.14). An exception is that
+for the distribution shift scheme (Kirchenbauer et al., 2023b) with low temperature 0.3, the
+number of tokens required is only slightly larger than our scheme because the distribution
+shift scheme is not distortion-free. Note that the comparison in Table 1 is made under the
+model non-agnostic setting (the rate in the model-nonagnostic setting is not fundamentally
+different from that in the model-agnostic setting, due to Corollary 3.16) without considering
+robustness, while the four previous schemes also work for model agnostic setting with
+robustness guarantees. Therefore, our experiments corroborate the improved statistical
+trade-offs and highlight the fundamental gap, instead of advocating for the superiority of
+any particular watermarking scheme.
+6
+Conclusions
+The understanding of watermarking large language models is advanced by framing it within
+the paradigm of hypothesis testing. We find that using a pseudo-random generator to
+approximate the model distribution (with probability clipping) yields the optimal Type
+II error among all level-α tests. Model-agnostic watermarking, reflecting the practical
+scenarios where the detector does not have access to the model distribution, enjoys a
+minimax bound in Type II errors depending on the model class. In the context where the
+output is a sequence of several tokens, we find that the optimal number of i.i.d. tokens
+required to detect statistical watermarks is h−1 log(1/h), improving upon the previous rate
+of h−2 and highlighting a fundamental gap. Finally, the optimal Type II error of robust
+UMP watermarking can be characterized via a linear program, which exhibits the trade-off
+between robustness and detectability.
+Watermarking is an essential technique to diminish the misuse of large language models.
+It tackles several critical social issues concerning the malicious usage of language models
+such as the contamination of datasets, academic misconduct, creation of fake news, and cir-
+culation of misinformation. By laying the theoretical foundation of statistical watermarking,
+our paper provides unifying and systematic approach to evaluate the statistical guarantees
+of existing and future watermarking schemes, elucidating the statistical limit of (robust)
+watermarking problems, and revealing the optimal rates in the important setting of i.i.d.
+tokens. In the above ways, our work contributes to the research endeavours on addressing
+these societal issues in language modelling, thus having potentially positive social impacts.
+Acknowledgements
+We would like to thank Julien Piet for his invaluable assistance with the experiments.
+Additionally, we are thankful to Or Zamir for his insightful comments on the earlier version
+of this manuscript.
+16
+
+References
+Scott Aaronson. My ai safety lecture for ut effective altruism. Shtetl-Optimized: The
+blog of Scott Aaronson. Retrieved on September, 11:2023, 2022a. URL https://
+scottaaronson.blog/?p=6823.
+Scott Aaronson. Watermarking gpt outputs. Scott Aaronson, 2022b. URL https://www.
+scottaaronson.com/talks/watermark.ppt.
+Sahar Abdelnabi and Mario Fritz. Adversarial watermarking transformer: Towards tracing
+text provenance with data hiding. In 2021 IEEE Symposium on Security and Privacy (SP),
+pp. 121–140. IEEE, 2021.
+Miranda Christ, Sam Gunn, and Or Zamir. Undetectable watermarks for language models.
+arXiv preprint arXiv:2306.09194, 2023.
+Jaiden Fairoze, Sanjam Garg, Somesh Jha, Saeed Mahloujifar, Mohammad Mahmoody, and
+Mingyuan Wang. Publicly detectable watermarking for language models. arXiv preprint
+arXiv:2310.18491, 2023.
+Pierre Fernandez, Antoine Chaffin, Karim Tit, Vivien Chappelier, and Teddy Furon.
+Three bricks to consolidate watermarks for large language models.
+arXiv preprint
+arXiv:2308.00113, 2023.
+Yu Fu, Deyi Xiong, and Yue Dong. Watermarking conditional text generation for ai
+detection: Unveiling challenges and a semantic-aware watermark remedy. arXiv preprint
+arXiv:2307.13808, 2023.
+Nurul Shamimi Kamaruddin, Amirrudin Kamsin, Lip Yee Por, and Hameedur Rahman.
+A review of text watermarking: theory, methods, and applications. IEEE Access, 6:
+8011–8028, 2018.
+John Kirchenbauer, Jonas Geiping, Yuxin Wen, Jonathan Katz, Ian Miers, and Tom Goldstein.
+A watermark for large language models. arXiv preprint arXiv:2301.10226, 2023a.
+John Kirchenbauer, Jonas Geiping, Yuxin Wen, Manli Shu, Khalid Saifullah, Kezhi Kong,
+Kasun Fernando, Aniruddha Saha, Micah Goldblum, and Tom Goldstein. On the reliability
+of watermarks for large language models. arXiv preprint arXiv:2306.04634, 2023b.
+Ryuto Koike, Masahiro Kaneko, and Naoaki Okazaki.
+Outfox: Llm-generated essay
+detection through in-context learning with adversarially generated examples. arXiv
+preprint arXiv:2307.11729, 2023.
+Rohith Kuditipudi, John Thickstun, Tatsunori Hashimoto, and Percy Liang.
+Robust
+distortion-free watermarks for language models. arXiv preprint arXiv:2307.15593, 2023.
+17
+
+Aiwei Liu, Leyi Pan, Xuming Hu, Shu’ang Li, Lijie Wen, Irwin King, and Philip S Yu. A
+private watermark for large language models. arXiv preprint arXiv:2307.16230, 2023.
+OpenAI. Gpt-4 technical report, 2023a.
+R OpenAI. Gpt-4 technical report. arXiv, pp. 2303–08774, 2023b.
+Julien Piet, Chawin Sitawarin, Vivian Fang, Norman Mu, and David Wagner.
+Mark
+my words: Analyzing and evaluating language model watermarks.
+arXiv preprint
+arXiv:2312.00273, 2023.
+Stefano Giovanni Rizzo, Flavio Bertini, and Danilo Montesi. Fine-grain watermarking for
+intellectual property protection. EURASIP Journal on Information Security, 2019:1–20,
+2019.
+Ryoma Sato, Yuki Takezawa, Han Bao, Kenta Niwa, and Makoto Yamada. Embarrassingly
+simple text watermarks. arXiv preprint arXiv:2310.08920, 2023.
+Volker Strassen. The existence of probability measures with given marginals. The Annals of
+Mathematical Statistics, 36(2):423–439, 1965.
+Ruixiang Tang, Yu-Neng Chuang, and Xia Hu. The science of detecting llm-generated texts.
+arXiv preprint arXiv:2303.07205, 2023.
+Flemming Topsøe. Bounds for entropy and divergence for distributions over a two-element
+set. J. Ineq. Pure Appl. Math, 2(2), 2001.
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Amjad Almahairi, Yasmine Babaei,
+Nikolay Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al. Llama 2:
+Open foundation and fine-tuned chat models. arXiv preprint arXiv:2307.09288, 2023.
+Ashish Venugopal, Jakob Uszkoreit, David Talbot, Franz Och, and Juri Ganitkevitch. Water-
+marking the outputs of structured prediction with an application in statistical machine
+translation. In Proceedings of the 2011 Conference on Empirical Methods in Natural
+Language Processing, pp. 1363–1372, Edinburgh, Scotland, UK., July 2011. Association
+for Computational Linguistics. URL https://aclanthology.org/D11-1126.
+James Vincent. AI-generated answers temporarily banned on coding q&a site stack overflow.
+The Verge, 5, 2022.
+Lean Wang, Wenkai Yang, Deli Chen, Hao Zhou, Yankai Lin, Fandong Meng, Jie Zhou, and
+Xu Sun. Towards codable text watermarking for large language models. arXiv preprint
+arXiv:2307.15992, 2023.
+Borui Yang, Wei Li, Liyao Xiang, and Bo Li. Towards code watermarking with dual-channel
+transformations. arXiv preprint arXiv:2309.00860, 2023.
+18
+
+Xi Yang, Jie Zhang, Kejiang Chen, Weiming Zhang, Zehua Ma, Feng Wang, and Nenghai
+Yu. Tracing text provenance via context-aware lexical substitution. In Proceedings of the
+AAAI Conference on Artificial Intelligence, volume 36, pp. 11613–11621, 2022.
+KiYoon Yoo, Wonhyuk Ahn, and Nojun Kwak. Advancing beyond identification: Multi-bit
+watermark for language models. arXiv preprint arXiv:2308.00221, 2023.
+Hanlin Zhang, Benjamin L Edelman, Danilo Francati, Daniele Venturi, Giuseppe Ateniese,
+and Boaz Barak. Watermarks in the sand: Impossibility of strong watermarking for
+generative models. arXiv preprint arXiv:2311.04378, 2023.
+Xuandong Zhao, Prabhanjan Ananth, Lei Li, and Yu-Xiang Wang. Provable robust water-
+marking for ai-generated text. arXiv preprint arXiv:2306.17439, 2023.
+19
+
+A
+Proof of Theorem 3.2
+Proof. Let ρ′ denote the marginal probability of X and let η denote the marginal probability
+of R. In the bound of Type I error, choosing π = δy yields
+α ≥PX∼π,R∼P(Ω,·)(X ∈R)
+= PR∼η(y ∈R)
+=
+X
+R∈2Ω
+ X
+x∈Ω
+ρ′(x)P(R|x)
+!
+· 1(y ∈R).
+(3)
+Now notice that
+P(X ∈R) = EP[1(X ∈R)]
+=
+X
+y∈Ω
+X
+R∈2Ω
+ρ′(y)P(R|y)1(y ∈R)
+=
+X
+y∈Ω
+ X
+R∈2Ω
+ρ′(y)P(R|y) · 1(y ∈R)
+!
+|
+{z
+}
+A(y)
+.
+For the term A(y), we first know that A(y) ≤ρ′(y). Applying Eq. (3), we further have
+A(y) ≤
+X
+R∈2Ω
+ X
+x∈Ω
+ρ′(x)P(R|x)
+!
+· 1(y ∈R)
+≤α.
+Combining the above two inequalies, it follows that
+P(X ∈R) ≤
+X
+y∈Ω
+(α ∧ρ′(y))
+= 1 −
+X
+x∈Ω:ρ′(x)>α
+(ρ′(x) −α)
+≤1 −
+min
+TV(ρ′∥ρ)≤ϵ
+X
+x∈Ω:ρ′(x)>α
+(ρ′(x) −α)
+≤1 −
+
+
+X
+x∈Ω:ρ(x)>α
+(ρ(x) −α) −ϵ
+
+
++
+where first equality is achieved by
+ρ′ = arg
+min
+TV(ρ′∥ρ)≤ϵ
+X
+x∈Ω:ρ′(x)>α
+(ρ′(x) −α)
+and the second inequality is achieved when P
+x∈Ω:ρ(x)<α (α −ρ(x)) ≥ϵ, a sufficient condi-
+tion for which being |Ω| ≥1/α. This establishes the optimal Type II error.
+Finally, to verify that P∗satisfies the conditions, the condition TV(P∗(·, 2Ω)∥ρ) ≤ϵ is
+20
+
+apparently satisfied. For any y ∈Ωwe have
+PR∼η(y ∈R) =
+X
+x∈Ω
+ρ∗(x) · P(R = {x}) · 1(y = x)
+= ρ∗(y) ·
+
+1 ∧
+α
+ρ∗(y)
+
+≤α.
+This implies the supπ∈∆(Ω) PY ∼π,(X,R)∼P∗(Y ∈R) ≤α because any π can be written as
+linear combination of δy. Moreover,
+P∗(X ∈R) =
+X
+x∈Ω
+ρ∗(x) · P(R = {x})
+=
+X
+y∈Ω
+(α ∧ρ∗(y))
+= 1 −
+X
+x∈Ω:ρ∗(x)>α
+(ρ∗(x) −α) .
+This verifies that ρ∗achieves the advertised Type II error.
+B
+Proof of Theorem 3.14
+Proof. Throughout the proof we assume that h < 1/4, otherwise the bounds become trivial.
+We first prove the lower bound. For this purpose, we construct the hard instance: let
+q0 = H−1
+b (h) (take the one ≥1/2) where Hb is the binary entropy function defined by
+Hb(x) = −x ln x −(1 −x) ln(1 −x), and set ρ0 = (1 −q0)δx1 + q0δx2 where x1, x2 are
+two different elements in Ω0. Then Lemma B.2 implies that q0 ≥3/4. By Theorem 3.2,
+β = 1 −P(X ∈R) =
+X
+x∈Ω:ρ(x)>α
+(ρ(x) −α)
+≥1
+2 · P (ρ(X) ≥2α)
+= 1
+2 · P
+ n
+X
+i=1
+ln ρ0(Xi) ≥ln(2α)
+!
+≥1(n ln q0 ≥ln(2α)) · 1
+2qn
+0
+≥1(2n(1 −q0) ≤−ln(2α)) · 1
+2 exp (−2n(1 −q0))
+≥1
+ 
+n ≤
+ln 1
+2α
+2h/ ln ln 2
+h
+!
+· 1
+2 exp
+ 
+−2nh
+ln ln 2
+h
+!
+21
+
+where the last inequality follows from Lemma B.3. It follows that
+n(h, α, β) ≥ln ln 2
+h
+2h
+·
+
+ln 1
+2α ∧ln 1
+2β
+
+.
+(4)
+Furthermore, suppose n ≤
+ln
+1
+2α
+4(1−q0) ln
+1
+1−q0
+. Define Y = Pn
+i=1 1(ρ0(Xi) = 1 −q0), then
+notice that Y ∼Binom(n, 1 −q0) and if Y ≤
+ln
+1
+2α
+2 ln
+1
+1−q0
+, then
+n
+X
+i=1
+ln ρ0(Xi) ≥
+ln 1
+2α
+2 ln
+1
+1−q0
+· ln(1 −q0) + n · ln q0
+≥ln(2α)
+where the last inequality is due to n · ln q0 ≥−2(1 −q0)n ≥−2(1 −q0)
+ln
+1
+2α
+4(1−q0) ln
+1
+1−q0
+=
+ln(2α)
+2 ln
+1
+1−q0
+≥ln(2α)
+2
+. Applying this and Markov’s inequality,
+P
+ n
+X
+i=1
+ln ρ0(Xi) ≥ln(2α)
+!
+≥P
+ 
+Y ≤2 ln 1
+2α
+ln
+1
+1−q0
+!
+≥1 −n(1 −q0)
+2 ln
+1
+2α
+ln
+1
+1−q0
+≥1
+2,
+A contradiction to P(ρ(X) ≥2α) ≤2β. As a result,
+n(h, α, β) ≥
+ln 1
+2α
+4(1 −q0) ln
+1
+1−q0
+≥ln 1
+2α
+4h .
+(5)
+Combining Eq. (4) and Eq. (5), we established the lower bound.
+For the upper bound, we define q = maxx∈Ω0 ρ0(x), then Lemma B.2 implies that
+q ≥1/2. Define Y = Pn
+i=1 1(ρ0(Xi) ̸= q) (recall that Y ∼Binom(n, 1 −q)). It suffices
+to show when
+n = 900
+ 
+2 ln 9k
+h
+h
+·
+
+ln 1
+α ∧ln 1
+β
+!
+∨(18 + 36 ln(9k)) ln 1
+α
+h
+the Type II error of the UMP watermark 1 −P∗(X ∈R) ≤β.
+22
+
+By Theorem 3.2 and Bennett’s inequality,
+1 −P∗(X ∈R) =
+X
+x∈Ω:ρ(x)>α
+(ρ(x) −α)
+≤P (ρ(X) ≥α)
+= P
+ n
+X
+i=1
+ln ρ0(Xi) ≥ln(α)
+!
+≤P
+ 
+Y ≤ln 1
+α
+ln
+1
+1−q
+!
+≤exp
+
+
+−nq(1 −q)θ
+
+
+
+1 −q −
+ln 1
+α
+n ln
+1
+1−q
+q(1 −q)
+
+
+
+
+
+
+(6)
+where θ(x) = (1+x) ln(1+x)−x; the penultimate inequality follows from Pn
+i=1 ln ρ0(Xi) ≤
+Y ln(1 −q).
+Notice that by Lemma B.2,
+(1 −q) ln
+1
+1 −q ≥
+h
+9 ln 9k ln(9k)
+h
+· ln ln 1
+h
+h
+= h ·
+ln ln 1
+h + ln 1
+h
+9
+ ln 1
+h + ln(9k ln(9k))
+
+≥
+h
+9 + ln(9k ln(9k)).
+Since n ≥
+(18+36 ln(9k ln(9k))) ln 1
+α
+h
+, we have n ≥
+2
+1−q
+ln 1
+α
+ln
+1
+1−q . Under this condition, we have the
+simplification
+θ
+
+
+
+1 −q −
+ln 1
+α
+n ln
+1
+1−q
+q(1 −q)
+
+
+≥θ
+ 1
+2q
+
+≥1
+50.
+23
+
+Plugging back to Eq. (6), we have
+1 −P∗(X ∈R) ≤exp
+
+
+−nq(1 −q)θ
+
+
+
+1 −q −
+ln 1
+α
+n ln
+1
+1−q
+q(1 −q)
+
+
+
+
+
+
+≤exp
+
+−n(1 −q)
+100
+
+≤exp
+ 
+−
+nh
+900 ln 9k ln(9k)
+h
+!
+(7)
+where we applied Lemma B.3 in the last step.
+Furthermore, we have
+1 −P(X ∈R) ≤P
+ n
+X
+i=1
+ln ρ0(Xi) ≥ln(α)
+!
+≤1
+
+n ≤ln α
+ln q
+
+≤1
+ 
+n ≤900
+ 
+ln 9k ln(9k)
+h
+h
+· ln 1
+α
+!!
+(8)
+where the last step is due to Lemma B.3. Combining Eq. (7) and Eq. (8), we know that
+1−P∗(X ∈R) ≤β when n ≥900
+
+ln 9k ln(9k)
+h
+h
+·
+
+ln 1
+α ∧ln 1
+β
+
+. This establishes the upper
+bound.
+B.1
+Supporting lemmata
+Lemma B.1 (Topsøe (2001), Theorem 1.2). Define the binary entropy function Hb : (0, 1) →
+R as Hb(x) = −x ln x −(1 −x) ln(1 −x). Then 4x(1 −x) ≤Hb(x) ≤(4x(1 −x))1/ ln 4.
+Lemma B.2. Suppose ρ is a probability measure over Ωsuch that H(ρ) = h, define
+q = maxx∈Ωρ(x). If H(ρ) ≤1/4, then q ≥1/2. Furthermore, if Hb(q) ≤1/4, then
+q ≥3/4.
+Proof. Suppose q ≤1/2. By convexity of H,
+H(ρ) ≥−
+1
+q
+
+q ln q ≥−1
+2 ln 1
+2 ≥1/4.
+This is a contradiction.
+Suppose q ≤3/4, then Lemma B.1 implies that
+Hb(q) ≥4q(1 −q) ≥1/4.
+This is a contradiction.
+24
+
+Lemma B.3. Suppose ρ is a probability measure over Ωsuch that H(ρ) = h and |Ω| = k.
+Define q = maxx∈Ωρ(x). If q ≥1/2, then we have
+h
+9 ln 9k ln(9k)
+h
+≤1 −q ≤
+h
+ln ln 2
+h
+Proof. We have
+H(ρ) ≥−(1 −q) ln(1 −q) ≥(1 −q) · ln 2.
+It follows that
+h ≥−(1 −q) ln(1 −q)
+≥(1 −q) ln ln 2
+h .
+Therefore 1 −q ≤
+h
+ln ln 2
+h .
+By the convexity of H and −q ln q ≤2(1 −q),
+H(ρ) ≤−q ln q −(1 −q) ln 1 −q
+k
+≤(1 −q) ln
+9k
+1 −q.
+This means that
+h2 ≤(1 −q)2
+
+ln
+9k
+1 −q
+2
+≤2(1 −q)2  ln2(9k) + ln2(1 −q)
+
+≤2(1 −q)2 ln2(9k) + (1 −q) ·
+ 2(1 −q) ln2(1 −q)
+
+≤(1 −q) · (ln2(9k) + 18)
+(9)
+where the last inequality is due to 2(1 −q) ≤1 and 2(1 −q) ln2(1 −q) ≤18. It follows that
+h ≤(1 −q) ln
+9k
+1 −q
+≤9(1 −q) ln 9k ln(9k)
+h
+where the last step is because ln
+1
+1−q ≤2 ln ln2(9k)+18
+h
+≤9 ln ln(9k)
+h
+, using Eq. (9). This
+establishes 1 −q ≥
+h
+9 ln 9k ln(9k)
+h
+.
+C
+Proof of Theorem 3.10
+Proof. Lower bound. Let m = 1
+α. Notice that for any level-α model-agnostic watermarking
+(η, {Pρ}ρ∈∆(Ω,F)), the following holds
+X
+A∈2Ω
+η(A)1(x ∈A) ≤α, ∀x ∈Ω.
+25
+
+Furthermore, for any ρ0 = Unif(i1, i2, . . . , im), we have β(P∗
+ρ0) = 0 and
+β(Pρ0) ≥PA∼η ({i1, . . . , im} ∩A = ∅)
+≥
+X
+A
+η(A) ·
+m
+Y
+j=1
+1(ij /∈A).
+By probabilistic method,
+β(Pρ0) ≥
+max
+i1<···<im
+X
+A
+η(A) ·
+m
+Y
+j=1
+1(ij /∈A)
+≥
+1
+ n
+m
+
+X
+i1<···<im
+X
+A
+η(A) ·
+m
+Y
+j=1
+1(ij /∈A).
+It follows that the maximum Type II error loss is lower bounded by the following linear
+program
+v∗= min
+η
+1
+ n
+m
+
+X
+i1<···<im
+X
+A
+η(A) ·
+m
+Y
+j=1
+1(ij /∈A)
+s.t.
+X
+A∈2Ω
+η(A)1(x ∈A) ≤α, ∀x ∈Ω,
+X
+A∈2Ω
+η(A) = 1, η(A) ≥0, ∀A ∈2Ω.
+By duality, this is bounded by
+min
+η≥0 max
+ξ,ζ≥0
+1
+ n
+m
+
+ 
+X
+i1<···<im
+X
+A
+η(A) ·
+m
+Y
+j=1
+1(ij /∈A) +
+X
+x
+ξ(x)
+ X
+A∈2Ω
+η(A)1(x ∈A) −α
+!
++ ζ ·
+ X
+A∈2Ω
+η(A) −1
+! !
+= max
+ξ,ζ≥0 min
+η≥0
+1
+ n
+m
+
+ X
+A
+η(A) ·
+ 
+X
+i1<···<im
+m
+Y
+j=1
+1(ij /∈A) +
+X
+x
+ξ(x)1(x ∈A) + ζ
+!
+−α ·
+X
+x
+ξ(x) −ζ
+!
+≥min
+η≥0
+1
+ n
+m
+
+n
+X
+l=1
+X
+|A|=l
+η(A) ·
+n −l
+m
+
++ l · ξ∗+ ζ∗
+
+−αnξ∗+ ζ∗
+ n
+m
+
+where ξ∗=
+ n−αn−1
+m−1
+
+and ζ∗= 0.
+Since f(l) :=
+ n−l
+m
+
++ l · ξ∗+ ζ∗is a convex function and achieves the minimum at
+l∗= αn, we have
+ n−l
+m
+
++ l · ξ∗+ ζ∗≥
+ n−αn
+m
+
++ αn ·
+ n−αn−1
+m−1
+
+for all l ∈[n] and thus
+RHS ≥
+ n−αn
+m
+
+ n
+m
+
+=
+ n−m
+αn
+
+  n
+αn
+ =
+ n−1
+α
+αn
+
+  n
+αn
+ .
+26
+
+Upper bound. Notice that the marginal distribution of reject region
+η∗(A) =
+(
+1
+( n
+αn),
+if |A| = αn
+0,
+otherwise
+.
+already guarantees Type I error ≤α. It suffices to show (*): for any ρ ∈∆(Ω, F), there
+exists a coupling Pρ of η∗and ρ such that P(x,A)∼Pρ(x /∈A) ≤(n−1
+α
+αn )
+( n
+αn) +P
+x:ρ(x)≥α(ρ(x)−α).
+Define p as the projection from Ω× 2Ωto 2Ω, i.e.
+p(V ) = {A ∈2Ω: ∃x ∈
+Ω, s.t.(x, A) ∈V }. Let W := {(x, A) ∈Ω× 2Ω: x ∈A}. To show the above, we
+check the Strassen’s condition
+ρ(U) −η∗ p
+ W ∩(U × 2Ω)
+
+≤
+ n−1
+α
+αn
+
+  n
+αn
+ +
+X
+x:ρ(x)≥α
+(ρ(x) −α), ∀U ⊂Ω.
+(10)
+Indeed, given Eq. (10), Theorem 11 in Strassen (1965) establishes (*).
+In the rest of the proof, we show Eq. (10). Fix U with cardinality k. First notice that
+ρ(U) −P
+x:ρ(x)≥α(ρ(x) −α) ≤(αk ∧1). Since p
+ W ∩(U × 2Ω)
+
+= {A ∈2Ω: ∃i ∈
+U, s.t. i ∈A}, we have
+η∗ p
+ W ∩(U × 2Ω)
+
+≥1 −
+ n−k
+αn
+
+  n
+αn
+ = 1 −
+ n−αn
+k
+
+ n
+k
+
+.
+If k ≤1
+α, then because g(k) := αk −1 + (n−αn
+k )
+(n
+k)
+is convex and takes maximum (
+n−αn
+1
+α )
+(
+n
+1
+α)
+=
+(n−1
+α
+αn )
+( n
+αn) at k∗= 1
+α, we have
+ρ(U) −η∗ p
+ W ∩(U × 2Ω)
+
+≤αk −1 +
+ n−αn
+k
+
+ n
+k
+
++
+X
+x:ρ(x)≥α
+(ρ(x) −α)
+=
+ n−1
+α
+αn
+
+  n
+αn
+ +
+X
+x:ρ(x)≥α
+(ρ(x) −α).
+If k ≥1
+α, then since (n−αn
+k )
+(n
+k)
+= (n−k
+αn )
+( n
+αn) is monotonously decreasing in k,
+ρ(U) −η∗ p
+ W ∩(U × 2Ω)
+
+≤
+ n−αn
+k
+
+ n
+k
+
++
+X
+x:ρ(x)≥α
+(ρ(x) −α)
+=
+ n−1
+α
+αn
+
+  n
+αn
+ +
+X
+x:ρ(x)≥α
+(ρ(x) −α).
+Combining, we establishes Eq. (10).
+Under the condition α →0+ and 1/(αn) →0+, the rate displayed in Theorem 1
+27
+
+simplifies to:
+(n −αn)(n −αn −1) · · · (n −αn −1/α + 1)
+n(n −1) · · · (n −1/α + 1)
+≍(1 −α)1/α →e−1.
+This concludes the proof.
+D
+Proof of Theorem 3.13
+Proof. The proof largely follows the proof of Theorem 3.10. Notice that the marginal
+distribution of reject region
+η∗(A) =
+(
+1
+( n
+αn),
+if |A| = αn
+0,
+otherwise
+.
+already guarantees Type I error ≤α. In what remains, we define p and W in the same way
+in the proof of Theorem 3.10 and check the Strassen’s condition
+ρ(U) −η∗ p
+ W ∩(U × 2Ω)
+
+≤
+ n−1
+α
+αn
+
+  n
+αn
+ +
+X
+x:ρ(x)≥α
+(ρ(x) −α), ∀U ⊂Ω.
+(11)
+Fix U with cardinality k. Due to the condition of supω∈Ωρ({ω}) ≤κ, we have ρ(U) −
+P
+x:ρ(x)≥α(ρ(x) −α) ≤(κk ∧1). Since p
+ W ∩(U × 2Ω)
+
+= {A ∈2Ω: ∃i ∈U, s.t. i ∈
+A}, we have
+η∗ p
+ W ∩(U × 2Ω)
+
+≥1 −
+ n−k
+αn
+
+  n
+αn
+ = 1 −
+ n−αn
+k
+
+ n
+k
+
+.
+If k ≤1
+κ, then
+ρ(U) −η∗ p
+ W ∩(U × 2Ω)
+
+≤κk −1 +
+ n−αn
+k
+
+ n
+k
+
++
+X
+x:ρ(x)≥α
+(ρ(x) −α)
+=
+ n−1
+κ
+αn
+
+  n
+αn
+ +
+X
+x:ρ(x)≥α
+(ρ(x) −α).
+where the second step follows from the fact that g(k) := κk −1 + (n−αn
+k )
+(n
+k)
+is convex and
+takes maximum (
+n−αn
+1
+κ )
+(
+n
+1
+κ)
+= (n−1
+κ
+αn )
+( n
+αn) at k∗= 1
+κ.
+If k ≥1
+κ, then
+ρ(U) −η∗ p
+ W ∩(U × 2Ω)
+
+≤
+ n−αn
+k
+
+ n
+k
+
++
+X
+x:ρ(x)≥α
+(ρ(x) −α)
+=
+ n−1
+κ
+αn
+
+  n
+αn
+ +
+X
+x:ρ(x)≥α
+(ρ(x) −α).
+28
+
+since (n−αn
+k )
+(n
+k)
+= (n−k
+αn )
+( n
+αn) is monotonously decreasing in k Combining, we establishes Eq. (11).
+Combining the above cases, we checked Strassen’s condition and hence the statement
+follows.
+E
+Proof of Theorem 4.4
+Proof. Throughout the proof we omit the subscript in the shrinkage operator S, as G is
+fixed. First notice that
+EX,R∼P
+
+min
+Y ∈out(X) 1(Y ∈R)
+
+= P(X ∈S(R))
+=
+X
+y∈Ω
+X
+R∈2Ω
+ρ(y)P(R|y)1(y ∈S(R)).
+Further, notice that y ∈in(z) and y ∈S(R) implies that z ∈R, thus
+X
+y∈in(z)
+X
+R∈2Ω
+ρ(y)P(R|y)1(y ∈S(R)) ≤
+X
+y∈in(z)
+X
+R∈2Ω
+ρ(y)P(R|y)1(z ∈R)
+≤
+X
+y∈Ω
+X
+R∈2Ω
+ρ(y)P(R|y)1(z ∈R)
+= PX∼δz,R∼P(Ω,·)(X ∈R)
+≤α.
+It follows that the optimum Type II error is lower bounded by the optimum of the following
+Linear Program
+min
+P
+1 −
+X
+y∈Ω
+X
+R∈2Ω
+ρ(y)P(R|y)1(y ∈S(R))
+(12)
+s.t.
+X
+y∈in(z)
+X
+R∈2Ω
+ρ(y)P(R|y)1(y ∈S(R)) ≤α,
+X
+R∈2Ω
+P(R|z) = 1, 0 ≤P(R|z) ≤1, ∀z ∈Ω, R ∈2Ω.
+We claim that the minimum in Eq. (12) is equal to the minimum of Eq. (2). Indeed, it
+suffices to show that Eq. (12) is optimized when P(·|y0) is supported on {∅, S−1({y0})}
+(then setting x(y) ≡P(S−1({y})|y) reduces Eq. (12) to Eq. (2)). To see this, consider any
+minimizer eP such that there exists y0 ∈Ωand R0 /∈{∅, S−1({y0})}, with eP(R0|y0) > 0.
+We will show that there exists ¯P such that it achieves the no greater objective value, and
+satisfies |supp( ¯P(·|y0)) ∩{∅, S−1({y0})}c | = |supp( eP(·|y0)) ∩{∅, S−1({y0})}c | −1 and
+|supp( ¯P(·|y))| = |supp( eP(·|y))| for all other y ∈Ω. Iteratively applying this argument, we
+reduce supp( eP(·|y)) ∩{∅, S−1({y})}c to ∅for any y ∈Ωand thereby prove the claim.
+Consider the following two cases.
+29
+
+Case 1: y0 /∈S(R0). Then letting
+¯P(R|y) =
+
+
+
+
+
+eP(R0|y) + eP(R|y),
+y = y0, R = ∅
+0,
+y = y0, R = R0
+eP(R|y),
+o.w.,
+we observe that
+X
+y∈Ω
+X
+R∈2Ω
+ρ(y) eP(R|y)1(y ∈S(R)) =
+X
+y∈Ω
+X
+R∈2Ω
+ρ(y) ¯P(R|y)1(y ∈S(R))
+and ¯P satisfies all the constraints in Eq. (12). It is obvious from the construction of ¯P
+that |supp( ¯P(·|y0)) ∩{∅, S−1({y0})}c | = |supp( eP(·|y0)) ∩{∅, S−1({y0})}c | −1 and
+|supp( ¯P(·|y))| = |supp( eP(·|y))| for all other y ∈Ω.
+Case 2: y0 ∈S(R0). Then letting
+¯P(R|y) =
+
+
+
+
+
+eP(R0|y) + eP(R|y),
+y = y0, R = S−1({y0})
+0,
+y = y0, R = R0
+eP(R|y),
+o.w.
+,
+we observe that
+X
+y∈Ω
+X
+R∈2Ω
+ρ(y) eP(R|y)1(y ∈S(R)) =
+X
+y∈Ω
+X
+R∈2Ω
+ρ(y) ¯P(R|y)1(y ∈S(R))
+and ¯P satisfies all the constraints in Eq. (12) due to 1(y ∈S(R0)) ≥1(y ∈S({y0})) for
+any y ∈Ω. From the construction of ¯P, we know that |supp( ¯P(·|y0))∩{∅, S−1({y0})}c | =
+|supp( eP(·|y0)) ∩{∅, S−1({y0})}c | −1 and |supp( ¯P(·|y))| = |supp( eP(·|y))| for all other
+y ∈Ω.
+Combining the above cases, we established our claim.
+Finally, letting P∗(·|y) = x∗(y) · δS−1({y}) for all y ∈ω, where x∗is the solution of
+Eq. (2), achieves the optimum value in Eq. (2).
+30

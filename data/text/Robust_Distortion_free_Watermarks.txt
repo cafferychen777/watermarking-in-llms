@@ -1,0 +1,2474 @@
+Robust Distortion-free Watermarks for Language Models
+Rohith Kuditipudi
+John Thickstun
+Tatsunori Hashimoto
+Percy Liang
+Department of Computer Science
+Stanford University
+July 2023
+Abstract
+We propose a methodology for planting watermarks in text from an autoregressive
+language model that are robust to perturbations without changing the distribution over
+text up to a certain maximum generation budget.
+We generate watermarked text by
+mapping a sequence of random numbers—which we compute using a randomized water-
+mark key—to a sample from the language model. To detect watermarked text, any party
+who knows the key can align the text to the random number sequence. We instantiate
+our watermark methodology with two sampling schemes: inverse transform sampling and
+exponential minimum sampling. We apply these watermarks to three language models—
+OPT-1.3B, LLaMA-7B and Alpaca-7B—to experimentally validate their statistical power
+and robustness to various paraphrasing attacks. Notably, for both the OPT-1.3B and
+LLaMA-7B models, we find we can reliably detect watermarked text (p ≤0.01) from 35
+tokens even after corrupting between 40-50% of the tokens via random edits (i.e., substi-
+tutions, insertions or deletions). For the Alpaca-7B model, we conduct a case study on
+the feasibility of watermarking responses to typical user instructions. Due to the lower
+entropy of the responses, detection is more difficult: around 25% of the responses—whose
+median length is around 100 tokens—are detectable with p ≤0.01, and the watermark is
+also less robust to certain automated paraphrasing attacks we implement.1
+1
+Introduction
+The ability of language models to mass produce human-like text creates an acute, renewed
+emphasis on the importance of provenance of generated content. For example, the website
+StackOverflow has banned users from posting answers using OpenAI’s ChatGPT model to
+mitigate the spread of misinformation on the platform [25]. A reliable forensic tool for at-
+tributing text to a particular language model would empower individuals—such as platform
+moderators and teachers—to enact and enforce policies on language model usage; it would also
+better enable model providers to track the (mis)use of their models, e.g., to scrub synthetic
+text from the training data of future language models.
+To achieve provenance, a watermark is a signal embedded within some generated content—
+in our case, text from a language model—that encodes the source of the content. We consider
+a setting where an untrusted third party user queries a language model (LM) by sending
+prompts to a trusted provider (Figure 1): the LM provider generates text from their language
+model with a watermark so that a detector may later identify the source of the text if the
+user publishes it. The ideal watermark should satisfy at least the following three desiderata:
+1. distortion-free—the watermark should preserve the original text distribution;
+2. agnostic—it should be detectable without the language model and/or prompt;
+3. robust—it should withstand perturbations of the watermarked text.
+1We release all code publicly at https://github.com/jthickstun/watermark.
+1
+arXiv:2307.15593v3  [cs.LG]  6 Jun 2024
+
+Figure 1: We define the following watermarking protocol between three parties: the LM
+provider, the user, the detector. The LM provider and the detector coordinate via a shared
+key, while the user is an untrusted third party. The protocol consists of four steps: 1) the
+user sends a prompt to the LM provider; 2) the LM provider generates watermarked text to
+the user; 3) the user edits the watermarked text (to avoid detection) and publishes the edited
+text; 4) the detector verifies which of the published text came from the LM provider.
+Existing watermarks either distort the model’s sampling distribution, thus altering the API
+functionality [13, 1], or are not robust to editing or cropping the text [5]. Meanwhile, clas-
+sical steganographic techniques for covertly encoding messages within samples of text from
+a language model are neither agnostic nor robust [30]. We develop the first watermarks for
+attributing text to a language model that achieve all three desiderata.
+Our methodology consists of two components, which the LM provider and detector re-
+spectively use to execute the two steps of the protocol in Figure 1 under their control: a
+generate method that deterministically maps a sequence ξ of random numbers encoded by a
+watermark key—which we call the watermark key sequence—to a sample from the language
+model, and a detect method that aligns a putative watermarked text with the watermark
+key sequence using the shared key.
+Informally, our watermarks are distortion-free in the
+sense that—marginalizing over the watermark key sequence—each call to generate is equal
+in distribution to a sample from the original language model, i.e., the distribution
+P(text) =
+Z
+ξ
+1{text = generate(ξ, prompt)} dν(ξ)
+is equal to the original language model’s sampling distribution.
+The challenge of detecting watermarked text is that the detector cannot simply recom-
+pute generate and compare its output against the text since they do not necessarily know the
+prompt which produced the text: in practice, users often crop the prompt when publishing
+text from a language model. Our watermarks are agnostic in the sense that they are eas-
+ily detectable with a suitable model-agnostic and prompt-agnostic test statistic ϕ such that
+ϕ(generate(ξ, prompt), ξ) ≪ϕ(text, ξ) for any text that is independent of the watermark
+key sequence. The idea here is that the detector may use ϕ within detect to compute a
+p-value with respect to the null hypothesis that the text is independent of the watermark key
+sequence, i.e., that the text is not watermarked.
+To ensure detect is robust to edits of the watermarked text, the core idea underpinning
+the design of each test statistic ϕ is to leverage techniques for robust sequence alignment
+to align a putative watermarked text with the watermark key sequence; we quantify the
+quality of the alignment using an “alignment cost” specific to each watermark. The sequence
+alignment procedure ensures the watermark is detectable from even a small, corrupted block
+of watermarked text planted within some other larger text. Of course, a sufficiently motivated
+and/or sophisticated user can still evade detection by simply rewriting the text from scratch
+2
+
+themselves (or, using another language model to generate the text); the point of a robust
+watermark is simply that the amount of effort and/or resources a user requires to produce
+text that evades watermark detection should be commensurate to what they would have
+expended had they not had access to the watermarked language model in the first place.
+Whereas generate is a deterministic function, if our watermark produced the same text
+every time for each prompt it would not be very useful. We resolve this limitation by de-
+signing a wrapper shift-generate around generate that calls generate using a randomly
+chosen subsequence of ξ instead of generating tokens from the same starting point each time.
+For the same reasons that detect is robust to editing and cropping watermarked text, calling
+generate in this fashion does not affect watermark detectability. In practice, the statistical
+power of our watermarks improves exponentially with respect to the length of the putative
+watermarked text and diminishes only linearly with the length of the random number se-
+quence; thus, by increasing the length of the random number sequence, we can reduce the
+probability of reusing the same random subsequence while still ensuring our watermark has
+good statistical power (i.e., that it yields low p-values for watermarked text). So long as we do
+not reuse an element of the key sequence, successive calls to shift-generate will be jointly
+indistinguishable from regular calls to the language model.
+To remark briefly on the work most closely related to ours, we contrast the distortion-free
+property of our watermarks with the hashing-based watermarks of Kirchenbauer et al. [13]
+and Aaronson [1] that bias the distribution of watermarked text towards certain k-grams by
+hashing a sliding window of the previous k −1 tokens to determine the next token pseudoran-
+domly. We give examples of prompts (e.g., “Give me a list of 20 movies.”) for which the bias
+due to hashing is clearly noticeable in our experiments. Christ et al. [5] propose a variation
+of hashing in which the window size changes based on the entropy of the generated tokens to
+avoid hash collisions with high probability. Their motivation is similar to ours in that they
+focus on preserving the original text distribution; however, like Kirchenbauer et al. [13] and
+Aaronson [1], using larger window sizes hurts robustness as an adversary can break the water-
+mark by replacing a single token in each window. Our watermark is not only distortion-free
+but also robust to substantial corruption of the text, which is crucial in practice. We defer a
+more thorough discussion of related work to the next section (Section 1.1).
+We describe the details of our methodology in Section 2, wherein we give two instantiations
+of watermarks—using inverse transform sampling and exponential minimum sampling—and
+provide analyses of their statistical power. We experimentally validate the power and robust-
+ness of our watermarks using the OPT-1.3B, LLaMA-7B and Alpaca-7B language models in
+Section 3. Across all models, we find the second instantiation using exponential minimum
+sampling to be the most powerful. For both the OPT-1.3B and LLaMA-7B models, using
+this watermark we can reliably detect watermarked text (p ≤0.01) from 35 tokens even after
+corrupting between 40-50% of the tokens via random edits (i.e., substitutions, insertions or
+deletions); the watermark also remains detectable from 50 tokens even after paraphrasing the
+text by translating to French/Russian and back. For the Alpaca-7B model, we conduct a
+case study on the feasibility of watermarking responses to typical user instructions. Due to
+the lower entropy of the responses, detection is more difficult: around 25% of the responses—
+whose median length is around 100 tokens—are detectable with p ≤0.01, and the watermark
+is also less robust to paraphrasing. We release code for implementing the watermark and
+reproducing the experiments in this paper, as well as additional supplementary material in-
+cluding an in-browser demo of the watermark detector.2
+2For assets and supplemental material, see: https://github.com/jthickstun/watermark.
+3
+
+1.1
+Related work
+Text watermarking is a special case of linguistic steganography, in that the goal is to convey a
+hidden message—the watermark—within a passage of text. Existing approaches to linguistic
+steganography fall under two broad categories: edit-based methods that modify a pre-existing
+text, and generative methods that construct a distribution over cover text [23]. Crucially, in
+contrast to steganography, the literature on digital watermarking has historically foregrounded
+robustness to corruption as a key attribute of a good watermark [12, 3]. In this light, a text
+watermark should be able to withstand some perturbations of the text, thus precluding the
+direct application of many existing techniques for linguistic steganography [6, 30, 18].
+Older work on text watermarking considers editing a pre-existing text to include a wa-
+termark [17, 2, 27]; for a survey of edit-based watermarks, see Kamaruddin et al. [11]. In
+contrast, we are interested in generating watermarked text while preserving the distribution
+over the text from a language model. Work on generative watermarking is nascent, under-
+written by recent advances in open-ended text generation [4]. Pioneering work by Venugopal
+et al. [24] proposed a generative watermark for the output of a machine translation system,
+biasing the system towards translations with particular features that can later be detected
+using a hypothesis test.
+Our work is most closely related to Kirchenbauer et al. [13], who watermark text from a
+language model by reweighting the token log-probabilities from the model at inference time as
+a function (i.e., hash) of the previous k−1 tokens, where k ∈N is a hyperparameter. In ongoing
+unpublished work concurrent to ours, Aaronson [1] describes a technique for watermarking
+language models using exponential minimum sampling (a close relative of the Gumbel trick
+[15]) to sample from the model, where the inputs to the sampling mechanism are also a hash
+of the previous k −1 tokens. Neither watermark is distortion-free, and in fact we show in
+our experiments that the distortions manifest noticeably in practice (e.g., excessive repetition
+of certain tokens).
+Specifically, both Kirchenbauer et al. [13] and Aaronson [1] bias the
+distribution toward a subset of k-grams. Increasing k makes the bias less noticeable but hurts
+the robustness of both watermarks: an adversary can break the signal from a particular token
+by replacing any one of the previous k −1 tokens.
+Also concurrent to our work, Christ et al. [5] propose watermarking blocks of text from
+a language model by hashing each block to seed a sampler for the next block. Christ et al.
+[5] vary their block sizes—which are analogous to the hyperparameter k of Kirchenbauer
+et al. [13] and Aaronson [1]—as a function of the empirical entropy of the constituent tokens
+to avoid using the same seed twice with high probability. Their work is similar to ours in
+that they preserve the original language model’s sampling distribution; however, the resulting
+watermark is not robust since in order to mitigate the distortion induced by hashing the
+block sizes must be sufficiently large to avoid hash collisions with high probability over all
+blocks and—similar to Kirchenbauer et al. [13] and Aaronson [1]—replacing any token in the
+previous block breaks the watermark in the next block. Whereas Christ et al. [5]—who do
+not run experiments—choose their block sizes to be sufficiently large to minimize distortion,
+Kirchenbauer et al. [13] and Aaronson [1] recommend choosing k to be a small constant in
+practice, which ensures a moderate amount of robustness by introducing some distortion.
+Finally, whereas our definition distortion-freeness implies exact equality in distribution of
+watermarked text to unwatermarked text for a single query to the language model, Christ et al.
+[5] propose a definition of “undetectability” that implies approximate equality in distribution,
+i.e., approximate distortion-freeness, over multiple queries. Using shift-generate, we also
+achieve approximate distortion-freeness in the multiple query setting, though the runtime of
+4
+
+our watermark detection procedure must grow with the number of queries; we discuss these
+trade-offs in more detail in Section 4.
+An alternative approach for detecting synthetic text is to learn a classifier between syn-
+thetic and human text [10, 14].
+A key advantage of such methods over watermarking is
+that they do not require coordination with the original producer of the text (i.e., the LM
+provider); however, their effectiveness is distribution dependent and they do not provide a
+priori (distribution-free) guarantees on the significance level of detection (i.e., Type I errors).
+Finally, we note that our setting is different from the literature on planting watermarks
+in the training data of machine learning models, e.g., to infer the model’s training set or
+otherwise influence the model’s output [8, 9, 29]. Such watermarks are not distortion-free by
+design, since the point is to plant some learnable signal in the training data that influences
+the behavior of models which train on the watermarked data.
+2
+Methodology and theoretical analysis
+Let V be a discrete set, i.e., the vocabulary, and let p ∈V∗→∆(V) be an autoregressive
+language model which maps a string of arbitrary length to a distribution over the vocabulary,
+with p(· | x) denoting the distribution of the next token given the prefix x ∈V∗. Let Ξ denote
+the space in which the elements of the watermark key sequence lie. Recall the main protocol
+(Figure 1) which defines our problem setting:
+0. The LM provider shares a random watermark key sequence ξ ∈Ξ∗with the detector;
+1. The user sends a prompt x ∈V∗to the LM provider;
+2. The LM provider generates text Y ∈V∗by Y = generate(x, ξ);
+3. The user publishes text eY ∈V∗, which may be either (i) (an edited version of) the
+generated text Y or (ii) text independent of Y (e.g., text that they wrote themselves);
+4. The detector determines if eY is watermarked—i.e., if eY depends on the watermark key
+sequence—by computing a p-value bp = detect(eY , ξ) with respect to the null hypothesis
+that eY is independent of ξ (i.e., not watermarked).
+2.1
+Protocol details
+In the protocol, the LM provider calls the generate method (Algorithm 1) to autoregressively
+generate text from a language model using a decoder function Γ : Ξ × ∆(V) →V which maps
+an element ξi of the watermark key and a distribution over the next token to a next token
+prediction. By design, over the randomness of ξi the prediction should constitute a sample
+from the distribution, i.e., P(Γ(ξi, µ) = yi) = µ(yi).
+Definition 1. A decoder Γ : Ξ×∆(V) →V is distortion-free with respect to (the distribution
+of) a random variable ξ ∈Ξ if for any µ ∈∆(V) and y ∈V it satisfies P(Γ(ξ, µ) = y) = µ(y).
+We relate Definition 1 to our informal definition of distortion-free text in the introduction
+through the following simple lemma. Essentially, so long as the watermark key sequence is
+long enough that we do not reuse any part of it to generate text, the only material difference
+between an LM provider using generate versus sampling directly from the language model is
+that the sequence ξ is an input to the method rather than resampled i.i.d. within the method
+5
+
+for each call. We treat the language model p, the decoder Γ, and generation length m as
+internal parameters of the generate method.
+Lemma 2.1. Let m, n ∈N with n ≥m. Let Γ be distortion free with respect to a distribution
+ν ∈∆(Ξ) and let {ξi}n
+i=1
+i.i.d.
+∼
+ν. Let Y = generate(ξ; m, p, Γ). Then Yi ∼p(· | Y:i−1) for
+i ∈[m].
+Proof. As n ≥m, we have {ξi}m
+i=1
+i.i.d.
+∼ν. The claim then follows immediately from applying
+Definition 1 to Line 2 of generate for i ∈[m].
+To simplify the remainder of the presentation, we do not pass a prompt as input to
+generate. As the language model p is arbitrary and detect is model-agnostic, this simpli-
+fication is without loss of generality since p itself may model the distribution of text from
+some base model given an arbitrary prompt. Also, unless stated otherwise, without loss of
+generality we let V = [N] throughout the paper, where N ∈N is the vocabulary size.
+Algorithm 1: Watermarked text generation (generate)
+Input
+: watermark key sequence ξ ∈Ξn
+Params: generation length m, language model p, decoder Γ
+Output: string y ∈Vm
+1 for i ∈1, . . . , m do
+2
+yi ←Γ(ξi%n, p(· | y:i−1))
+3 return y
+The detector calls the detect method (Algorithm 2) to compute—via a permutation
+test with T resamples—a p-value with respect to a test statistic ϕ : V∗× Ξ∗→R for the
+null hypothesis that eY is not watermarked, i.e., that eY is independent of ξ. The output bp
+of detect is a proper non-asymptotic p-value: if eY is not watermarked, then each (eY , ξ(t))
+constitutes an independent, identically distributed copy of (eY , ξ) and therefore by symmetry bp
+is uniformly distributed over {1/(T +1), 2/(T +1), . . . , 1} for any (non-atomic) test statistic.3
+If ϕ returns a small p-value (e.g., 0.0001) then the text is likely watermarked; if the p-value
+is large (e.g., 0.25), then the text might not be.
+The goal then is to design the test statistic ϕ (Algorithm 3) such that bp will typically
+be small if eY is watermarked. In particular, the goal is to identify an alignment cost d :
+(V × Ξ)∗→R, which measures the quality of a match between a subsequence of the input
+text and a subsequence of the watermark key, and use this to define ϕ as the minimum cost
+alignment between length k subsequences of the text and key.
+This alignment-based detection strategy makes the watermark robust, since even if the
+user crops or otherwise corrupts Y , a single block of preserved watermarked text within some
+larger body of unwatermarked text will suffice to trigger a low p-value from detect. The
+actual form of the alignment cost will be specific to each watermark—in particular, it will
+depend on the nature of the decoder Γ in generate. Our most robust watermarks incorporate
+a soft notion of edit distance (i.e., Levenshtein distance) into the computation of the alignment
+cost via dynamic programming, with runtime scaling quadratically in the block size. Thus,
+3By non-atomic, we mean for any c ∈R that P(ϕ(Y, ξ) = c) = 0 so that almost surely we will not have to
+break ties (meaning, if ϕ(y, ξ) = ϕt) when computing bp. In case of ties (i.e., if the test statistic is atomic), we
+can either modify detect to break ties uniformly at random, or simply report valid but conservative p-values
+by leaving detect as is.
+6
+
+Algorithm 2: Watermarked text detection (detect)
+Input
+: string y ∈V∗, watermark key sequence ξ ∈Ξn
+Params: test statistic ϕ; watermark key sequence distribution ν ∈∆(Ξn); resample
+size T
+Output: p-value bp ∈[0, 1]
+1 for t ∈1, . . . , T do
+2
+ξ(t) ∼ν
+3
+ϕt ←ϕ(y, ξ(t))
+4 bp ←
+1
+T+1
+
+1 + PT
+t=1 1{ϕt ≤ϕ(y, ξ)}
+
+5 return bp
+letting m be the length of the input text y, n be the length of the watermark key sequence ξ,
+and k be the block size, the cost of computing the test statistic is O(mnk2).
+Algorithm 3: Test statistic (ϕ)
+Input
+: string y ∈V∗, watermark key sequence ξ ∈Ξn
+Params: alignment cost d, block size k
+Output: test statistic value ϕ(y, ξ) ∈R
+1 for i ∈1, . . . , len(y) −k + 1 do
+2
+for j ∈1, . . . , n do
+3
+yi ←{yi+ℓ}k−1
+ℓ=0 , ξj ←{ξ(j+ℓ)%n}k−1
+ℓ=0
+4
+bdi,j ←d(yi, ξj)
+5 return mini,j bdi,j
+To illustrate how the decoder and the alignment cost fit together, we give a simple example
+for the toy setting of a binary vocabulary.
+Example 1:
+Consider a binary vocabulary V = {0, 1}. To generate Y ∈{0, 1}∗from the
+model, the LM provider shares {ξi}n
+i=1
+i.i.d.
+∼Unif([0, 1]) with the detector and let Yi = 0 if
+ξi ≤p(0 | Y:i−1) and Yi = 1 otherwise. In particular, defining the decoder Γ by
+Γ(ξi, µ) :=
+(
+0
+ξi ≤µ(0)
+1
+ξi > µ(0),
+let Y = generate(ξ; m, p, Γ) for some m ≤n. Then Y is a valid sample from the language
+model as P(ξi ≤p(0 | Y:i−1)) = p(0 | Y:i−1), and crucially Y and ξ are correlated (i.e., if ξi is
+sufficiently close to zero then Yi = 0, and likewise if ξi is sufficiently close to one then Yi = 1).
+Thus, we can define the alignment cost d(y, ξ) = ∥y −ξ∥1.
+Assuming for the sake of this example that n = m and the user does not corrupt the
+watermarked text from the LM provider, i.e., eY = Y , the detector can run detect to verify
+that eY is watermarked using the test statistic ϕ with alignment cost d and block size k = m.
+The value of the test statistic will then be at most the ℓ1 norm of eY −ξ. ♢
+7
+
+2.2
+Handling multiple queries
+In the above example, the LM provider generates the same text each time from the water-
+mark key sequence, which is not ideal in practice. One solution for avoiding reusing elements
+of the watermark key sequence across queries is to make generate stateful, thus enabling
+the LM provider to generate a total of ⌊n/m⌋independent watermarked text samples of m
+tokens each from the language model. Instead, to avoid persisting state, we provide a random-
+ized wrapper shift-generate (Algorithm 4) around generate and modify the watermarking
+protocol from the start of the section to allow the LM provider to call the shift-generate
+instead of generate in the second step of the protocol. The wrapper shift-generate ran-
+domly shifts the watermark key sequence before passing the shifted sequence to generate.
+Shifting the watermark key sequence does not affect the value of the test statistic in detect,
+since to compute the test statistic the detector anyways searches over all subsequences of the
+watermark key sequence to find the best match for each block of text. There are n possible
+shifts, each of which may produce a distinct text; while in principle these n texts will cor-
+relate with each other due to sharing elements of the watermark key sequence, in practice
+we find the effects of these correlations are not noticeable. The so-called birthday paradox
+[7] implies the LM provider can typically expect to call shift-generate Ω(√n) times, each
+time producing a different text, before reusing the same offset twice. In fact, the provider
+can expect call shift-generate Ω(
+p
+n/m) times before reusing a subsequence, in which case
+the constituent Ω(√nm) tokens in these texts will be indistinguishable from regular samples
+from the language model.
+In general, we can bound the distortion (i.e., statistical distance from regular samples) of
+shift-generate in the multi-query setting by the probability of reusing an element of the
+watermark key sequence. Specifically, for T queries and a maximum generation length of m
+tokens per query, we will achieve negligible, i.e., o(1) distortion, so long as n = ω(mT 2). Thus,
+similar to Christ et al. [5] we can achieve approximate distortion-freeness in the multi-query
+setting. However, unlike Christ et al. [5], to achieve approximate distortion-freeness in this
+setting the computational cost of our watermark detection procedure must grow with the
+target number of queries. In principle, this trade-off between the degree of distortion and
+the runtime of watermark detection means at least in an asymptotic sense that the latter
+effectively upper bounds the number of queries to the LM provider an attacker would require
+to learn information about the watermark key sequence. In practice, we expect the cost per
+token of queries to the LM provider will be significant enough to make such attacks expensive
+to implement.
+Algorithm 4: Randomized watermarked text generation (shift-generate)
+Input
+: watermark key sequence ξ ∈Ξn
+Params: generation length m, language model p, decoder Γ
+Output: string y ∈Vm
+1 τ ∼Unif([n]), ξ′ ←{ξ(i+τ)%n}m
+i=1
+2 return generate(ξ′; m, p, Γ)
+2.3
+Terminology: watermark strategies and watermark potential
+Henceforth, we use the term watermarking strategy to refer to a concrete instantiation of the
+shift-generate, generate and detect methods by specifying the internal parameters of both
+8
+
+algorithms (i.e., the decoder Γ, the test statistic ϕ and the watermark key sequence distribution
+ν). We give concrete watermarking strategies in the following sections (Sections 2.4 and 2.5).
+For each watermarking strategy, we show two main results: we prove the decoder is distortion-
+free and also obtain high probability upper bounds on the p-values of watermarked text—as
+a function of the length of the text and the watermark key sequence. We emphasize that
+only the former result (i.e., that the decoder is distortion-free) is critical to the validity of our
+main claims; we intend the latter collection of results to provide intuition for when we would
+expect the detector to have sufficient power and to anticipate the forthcoming experimental
+results in Section 3. The strength of the p-value upper bounds will depend on the observed
+token probabilities of (watermarked) text, through a quantity which we evocatively term the
+watermark potential.
+Definition 2. (watermark potential) Define α : V∗→R by
+α(y) := 1 −
+1
+len(y)
+len(y)
+X
+i=1
+p(yi | y:i−1).
+The watermark potential of text from a deterministic language model will always be zero,
+whereas for a high-entropy model it will approach one. The degree to which it is possible for
+the detector to reliably distinguish watermarked text from unwatermarked text necessarily
+depends on the watermark potential of the LM provider’s language model.
+For example,
+if the language model is deterministic, then any distortion-free watermark will necessarily
+have zero statistical power. We formalize this intuition by establishing the following general
+lower bound on the detection accuracy of any watermarking strategy as a function of the
+watermark potential of the original language model. In particular, we lower bound the error
+of any classifier h : V∗× Ξ∗→{−1, +1} that tries to distinguish watermarked (positive
+label) versus nonwatermarked text (negative label) given some watermark key ξ (we make no
+assumption on the distribution of ξ except that it is independent of unwatermarked text by
+definition). We defer the proof of Lemma 2.2 to Appendix A.
+Lemma 2.2. Let Y ′
+i ∼p(· | Y ′
+:i−1) for i ∈[m]. Let Y
+d= Y ′ and let ξ ∈Ξ∗be a random
+variable that is independent of Y ′. Let h : V∗× Ξ∗→{−1, +1} be a classifier. Let c > 0 and
+define the set Vc ⊂Vm by
+Vc := {y : p(yi | y:i−1) ≥exp(−c/2) for all i ∈[m]}.
+Then
+P(h(Y, ξ) = −1) + P(h(Y ′, ξ) = 1) ≥E [exp (−cmα(Y )) 1{Y ∈Vc}] .
+Lemma 2.2 implies it is impossible to test between any watermarked and non-watermarked
+text (i.e., between Y versus Y ′) that are equal in distribution (i.e., distortion-free) if the text
+typically has low watermark potential, irrespective of the design of the watermark key; in
+particular, the sum of the Type I and II (resp., false positive/negative) error rates of h will be
+close to one if the watermark potential is close to zero. The theorem is not tight: depending on
+the language model, its result may be vacuous for small values of c (e.g., the constants which
+appear in our upper bounds) since only texts whose token likelihoods all exceed exp(−c/2)
+contribute to the lower bound. Also our upper bounds scale inverse exponentially with the
+square of the watermark potential, which will always be smaller than the watermark potential
+itself since the watermark potential is bounded between zero and one.
+9
+
+The point of the forthcoming p-value upper bounds for the watermarking strategies in
+Sections 2.4 and 2.5 is to establish the existence of test statistics for each watermark such
+that the statistical power of the watermark improves exponentially with the length of the text
+and decays at most linearly with the length of the watermark key sequence. The test statistics
+we use to prove these upper bounds differ slightly from those we employ in our experiments:
+in the former case, we prioritize the simplicity of stating the bounds in terms of watermark
+potential, whereas in the latter case, we prioritize empirical performance.
+2.4
+Watermarking via inverse transform sampling
+Inverse transform sampling is a general technique for sampling from a univariate distribution
+by taking the pushforward of a uniform random variable through its inverse cumulative dis-
+tribution function (CDF). Crucially, the technique is valid irrespective of the ordering of the
+CDF, a property which we presently leverage to construct a watermarking strategy in which
+generate is distortion-free and also detect is agnostic. In particular, we implement generate
+with a decoder that maps a sequence of uniform random variables and permutations to tokens
+using inverse transform sampling. To detect watermarked text, the detector correlates the
+sequence of permuted indices of the tokens in the text with the sequence of uniform random
+variables to detect watermarked text. Meanwhile, for any nonwatermarked text, the sequence
+of permuted token indices will be i.i.d. uniform irrespective of the text itself and thus not
+correlate with the sequence of uniform random variables.
+Formally, with Π as the space of permutations over the vocabulary [N], for ξ = (u, π) ∈
+[0, 1] × Π =: Ξ and any distribution µ ∈∆([N]), define the decoder by
+Γ(ξ, µ) := π−1 (min {π(i) : µ({j : π(j) ≤π(i)}) ≥u}) ,
+(1)
+i.e., Γ(ξ, µ) is the token with the smallest index in the permutation π such that CDF of µ with
+respect to π is at least u. Generalizing the intuition from Example 1, we show this decoder is
+distortion-free in the following theorem.
+Theorem 1. Define Γ by equation (1). Let π ∈Π be arbitrary and let U ∼Unif([0, 1]), with
+ξ := (U, π). Then Γ is distortion-free with respect to ξ.
+Proof. Recalling Definition 1, the result follows from showing for any µ ∈∆([N]) and y ∈[N]
+that P(Γ(µ, ξ) = y) = µ(y). To this end, by equation (1), we have Γ(µ, ξ) = y if and only if
+U lies in the interval
+
+µ({y′ : π(y′) < π(y)}), µ({y′ : π(y′) ≤π(y)})
+
+.
+As the width of this interval is exactly µ(y), the result follows immediately.
+Having shown that the decoder is distortion-free, we now proceed to analyze the de-
+tectability of the watermark. For convenience, define the normalization η : [N] →[0, 1] by
+η(i) := (i −1)/(N −1). Analogous to the toy example, the sequences {η(πi(Yi))}m
+i=1 and U
+are correlated. Thus, for the sake of analysis, we define alignment cost d : (V × Ξ)∗→R by
+d(y, (u, π)) := −
+len(y)
+X
+i=1
+(ui −1/2) · (η(πi(yi)) −1/2),
+(2)
+i.e., the negative covariance (each Ui and η(πi(Yi)) both have expectation 1/2).
+10
+
+We exactly characterize in Lemma 2.3 the difference in the expected value of our alignment
+cost on some text assuming the text is watermarked (i.e., generated using the same key
+as the detector) versus not watermarked in terms of the watermark potential of the text
+(Definition 2). To state the result, we define the constant C0 := Var(η(Unif([N]))), where we
+abuse notation slightly to temporarily treat η as a pushforward map over distributions.4 We
+defer the proof of Lemma 2.3 to Appendix B.
+Lemma 2.3. Let m, n ∈N with n ≥m, where m is the generation length and n is the
+watermark key length.
+Define the decoder Γ by equation (1) and the alignment cost d by
+equation (2). Let ξ, ξ′ i.i.d.
+∼Unif(Ξn) with Y = generate(ξ; m, p, Γ). Then almost surely for
+all i ∈[m] and j ∈[n] we have
+E[d(Yi, ξ′
+j) −d(Yi, ξi) | Y ] = C0 · (1 −p(Yi | Y:i−1)) = C0α(Yi−1:i).
+Summing the result of Lemma 2.3 over i ∈[m] implies for any j ∈[n] that
+E[d(Y, ξ′
+(j+1:j+m)%n) −d(Y, ξ1:m) | Y ] = C0mα(Y ).
+Thus, we can upper bound the p-value output by detect in Lemma 2.4 using a standard
+concentration argument and taking a union bound over j ∈[n].
+We defer the proof of
+Lemma 2.4 to Appendix B. In fact, we actually prove a more general result for k ≤m wherein
+we allow eY to be a subsequence of Y which the user may choose adaptively. We defer this
+more general result to Appendix B as it is more cumbersome to state.
+Lemma 2.4. Let m, n ∈N with n ≥m, where m is the generation length and n is the water-
+mark key length. Define the decoder Γ by equation (1), alignment cost d by equation (2), and
+ϕ by Algorithm 3 with block size k = m. Let ξ, ξ′ i.i.d.
+∼Unif(Ξn) with Y = generate(ξ; n, p, Γ)
+and eY = Y . Then almost surely
+P(ϕ(eY , ξ′) ≤ϕ(eY , ξ) | eY ) ≤2n exp(−kC2
+0α(eY )2/2).
+Lemma 2.4 implies that with high probability the value of the test statistic on watermarked
+text with the correct key will be lower than with a resampled key. In particular, ignoring
+discretization errors due to the finite number of resamples T in detect, the lemma implies
+watermarked samples with watermark potential bounded away from zero (i.e., if the language
+model is not effectively deterministic) will have exponentially small expected p-values with
+respect to the length m of the text. The bound grows only linearly with the length n of the
+random number sequence, implying for moderately large m (e.g., m = 50) an LM provider
+can generate plenty of distortion-free watermarked text (i.e., n = 2Ω(m) total tokens) while
+still enabling detection of the watermark from snippets of m tokens (e.g., 50 tokens typically
+amount to a couple sentences of text). Of course, recall the computational complexity of
+detection scales linearly with n, which in practice may be a more relevant limitation than the
+statistical power of the watermark.5
+2.4.1
+Robustness to substitutions, insertions and deletions
+We show in Lemma 2.5 an analogous result to Lemma 2.4 holds even if an adversary corrupts
+the original watermarked text by substituting tokens. To state the lemma, we introduce a
+4Note that C0 = Var(Unif([0, 1])) + oN(1) = 1/12 + oN(1).
+5Note that both detect and the test statistic (Algorithm 3) are easily parallelizeable.
+11
+
+quantity eα which depends on both the corrupted and original watermarked text and accounts
+for the decrease in the expected value of the test statistic (which recall for the original text
+is equal up to a numerical constant to the watermark potential of the text) due to token
+substitutions. We defer the proof of Lemma 2.5 to Appendix B.
+Lemma 2.5. Let m, n ∈N with n ≥m, where m is the generation length and n is the
+watermark key length. Define the decoder Γ by equation (1), alignment cost d by equation (2),
+and ϕ by Algorithm 3 with k = m. Let ξ, ξ′ i.i.d.
+∼Unif(Ξn) with Y = generate(ξ; m, p, Γ) and
+let eY ∈Vm be conditionally independent of ξ and ξ′ given Y . Define
+eα(y, ey) :=
+1
+len(y)
+len(y)
+X
+i=1
+1{yi = eyi} (1 −p(yi | y:i−1)) −1{yi ̸= eyi}
+1
+N −1.
+Then almost surely
+P(ϕ(eY , ξ′) ≤ϕ(eY , ξ) | Y, eY ) ≤2n exp(−kC2
+0 eα(Y, eY )2/2).
+Lemma 2.5 implies that even if an adversary replaces the vast majority of tokens in a
+watermarked text, detection with low p-values will still be possible so long as the remaining
+tokens have watermark potential bounded away from zero. In particular, the permuted indices
+of the original tokens will still positively correlate with the corresponding uniform random
+variables from the watermark key sequence, while those of the substituted tokens will exhibit
+a small negative correlation scaling as O(1/N).
+To handle insertions and deletions, we can robustify our test statistic by incorporating a
+soft notion of edit distance into our original alignment cost. The parameter γ in Definition 3
+assigns a cost to each insertion and deletion operation when aligning the tokens y with the
+sequence ξ, while the base alignment cost d0 defines the quality of the alignment via a cost
+function over substitutions. In practice, we drop the minimizations over y′ ∈V and ξ′ ∈Ξ in
+the second and third cases respectively of the definition; we include them here to make our
+subsequent theoretical analysis cleaner.
+Definition 3. (Levenshtein cost) Let γ ∈R and d0 : V × Ξ →R. For y ∈V∗and ξ ∈Ξ∗,
+define the Levenshtein cost dγ : V∗× Ξ∗→R by
+dγ(y, ξ) := min
+
+
+
+
+
+dγ(y2:, ξ2:) + d0(y1, ξ1)
+dγ(y, ξ2:) + miny′∈V d0(y′, ξ1) + γ
+dγ(y2:, ξ) + minξ′∈Ξ d0(y1, ξ′) + γ,
+with dγ(y, (u, π)) := γ · len(y) if ξ is empty and vice versa (as base cases).6
+Redefining the test statistic ϕ using dγ as the alignment cost—using d0 from equation (2)—
+ensures detect is robust not only to substituting tokens, but also inserting and deleting tokens
+from watermarked text, as we show in Lemma 2.6. We defer the proof of Lemma 2.6 to
+Appendix B. To state the lemma, we first recursively define a notion of edit distance between
+two strings. The definition is equivalent to the minimum number of insertion and/or deletion
+operations needed to transform one string into the other (see Lemma B.2).
+6For y ∈V∗(resp., ξ ∈Ξ∗), we let ylen(y)+1: (resp., ξlen(ξ)+1) denote the empty string/sequence.
+12
+
+Definition 4. (edit distance) For y, ey ∈V∗, define the edit distance by
+dedit(y, ey) :=
+(
+dedit(y2:, ey2:)
+y1 = ey1
+1 + min{dedit(y2:, ey), dedit(y, ey2:)}
+y1 ̸= ey1,
+with dedit(y, ey) = len(y) if ey is empty and vice versa.
+Lemma 2.6. Let n, m ∈N with n ≥m, where m is the generation length and n is the
+watermark key length. Define the decoder Γ by equation (1), alignment cost d = dγ with d0
+from equation (2) and γ > 1/2, and ϕ by Algorithm 3 using block size k ≤m that divides evenly
+into m. Let ξ, ξ′ i.i.d.
+∼Unif(Ξn) with Y = generate(ξ; m, p, Γ). Let eY ∈Vm be conditionally
+independent of ξ and ξ′ given Y , with dedit(Y, eY ) ≤εm. Then almost surely
+P(ϕ(eY , ξ′) ≤ϕ(eY , ξ) | eY , Y ) ≤mn(2k)k/(4γ−1) exp(−kC2
+0(α(Y ) −γε)2
++/2).
+We prove the result by showing there must exist a length k substring of the corrupted
+text eY within edit distance kε of a substring of Y that the detector will be able to distinguish
+as watermarked. For fixed k, the set of strings within edit distance εk of an original block
+watermarked text blows up combinatorially with ε. To ensure we can detect the watermark,
+the result implies we must set γ = Ω(1/ε), which means our bound on the expected p-value
+is vacuous as soon as ε = Ω(1/ log k). Admittedly, our analysis is not tight; for example, as
+a preview of the experimental results to come, in practice we find smaller values of γ (i.e.,
+γ < 1) to perform significantly better. However, one takeaway from the result is that using
+a block size k < m, where here m is the length of the input text, for detection can be an
+effective strategy when the user has substantially corrupted the text. The assumption that k
+divides evenly into m is an artifact of our analysis and not important in practice.
+2.4.2
+What we run in practice
+In practice, to reduce overhead in both generate and detect, we use a single random per-
+mutation7 instead of a full sequence, i.e., we let πi = π for all i ∈[n] for π ∼Unif(π).
+Recall Theorem 1 makes no assumption about the distribution of the permutations; thus, the
+watermark is still distortion-free. Also, for the test statistic, we find using
+d(y, (u, π)) :=
+len(y)
+X
+i=1
+|ui −η(πi(yi))|
+(3)
+as the alignment cost performs better empirically than the alignment cost in equation (2). To
+reiterate, the output of detect is a valid p-value irrespective of the test statistic we use.
+Henceforth, we refer to this version of the watermarking strategy as ITS, and we refer
+to the corresponding Levenshtein version as ITS-edit, wherein we define the base alignment
+cost d0 by equation (3) and use the following simplified notion of Levenshtein cost:
+7In principle, with a single random permutation the permuted token indices of both watermarked and
+nonwatermarked text are no longer conditionally independent of each other, and so the results of Lemmas 2.4,
+2.5 and 2.6 no longer apply.
+However, in practice we observe no degradation in statistical power.
+Also,
+irrespective of the lemmas, the p-values from detect are still valid by construction.
+13
+
+Definition 5. (simple Levenshtein cost) Let γ ∈R and d0 : V × Ξ →R. For y ∈V∗and
+ξ ∈Ξ∗, define the alignment cost function dγ : V∗× Ξ∗→R by
+dγ(y, ξ) := min
+
+
+
+
+
+dγ(y2:, ξ2:) + d0(y1, ξ1)
+dγ(y, ξ2:) + γ
+dγ(y2:, ξ) + γ,
+with dγ(y, (u, π)) := γ · len(y) if ξ is empty and vice versa (as base cases).8
+In summary, for ITS we use the decoder from equation (1), the test statistic from Algo-
+rithm 3 with the alignment cost from equation (3), and the watermark key distribution as
+the uniform distribution over [0, 1]n × Π, where recall n is the length of the watermark key
+sequence. Meanwhile, ITS-edit differs from ITS only in that we define the test statistic using
+the Levenshtein cost from Definition 5 with the base cost again from equation (3).
+2.5
+Watermarking via exponential minimum sampling
+Aaronson [1] proposes mapping variables in [0, 1]N to tokens in the vocabulary [N] using
+exponential minimum sampling to generate watermarked text. Whereas Aaronson [1] proposes
+the use of distortion-inducing hashes much like Kirchenbauer et al. [13], we use exponential
+minimum sampling to implement the decoder in generate, which (after defining a suitable
+corresponding test statistic) enables an alternative distortion-free and robust watermarking
+strategy to inverse transform sampling. In particular, for ξ ∈[0, 1]N =: Ξ and µ ∈∆([N]),
+define the decoder by
+Γ(ξ, µ) := arg min
+i∈[N]
+−log(ξi)/µ(i).
+(4)
+We show this decoder is distortion-free in Theorem 2, whose proof we defer to Appendix C.
+Theorem 2. Define the decoder Γ by equation (4) and let ξ ∼Unif([0, 1]N).
+Then Γ is
+distortion-free with respect to ξ.
+For the sake of analysis, we define the alignment cost as a slight variation of the proposal
+of Aaronson [1] (see Section 2.5.2) by
+d(y, ξ) := −
+len(y)
+X
+i=1
+log ξi,yi,
+(5)
+again defining the test statistic ϕ by Algorithm 3. Similar to Lemma 2.3 for ITS, we exactly
+characterize the difference in the expected values of the alignment cost on watermarked versus
+non-watermarked text in terms of the watermark potential of the text. We defer the proof of
+Lemma 2.7 to Appendix C.
+Lemma 2.7. Let n ∈N. Define Γ by equation (4) and d by equation (5). Let ξ, ξ′ i.i.d.
+∼
+Unif(Ξn) with Y = generate(ξ; n, p, Γ). Then almost surely for all i ∈[n] we have
+E[d(Yi, ξ′
+i) −d(Yi, ξi) | Y ] = 1 −p(Yi | Y:i−1) = α(Yi−1:i).
+8For y ∈V∗(resp., ξ ∈Ξ∗), we let ylen(y)+1: (resp., ξlen(ξ)+1) denote the empty string/sequence.
+14
+
+Summing the result of Lemma 2.7 over i ∈[m] implies for any j ∈[n] that
+E[d(Y, ξ′
+(j+1:j+m)%n) −d(Y, ξ1:m) | Y ] = mα(Y ).
+Thus, defining the test statistic ϕ by Algorithm 3 with respect to the alignment cost d from
+Eqn (5), we can again upper bound the p-value output by detect in Lemma 2.8 using a
+standard concentration argument and taking a union bound over j ∈[n]. We defer the proof
+of Lemma 2.8 to Appendix C. Once again, we actually prove a more general result that allows
+eY to be any length k subsequence of Y .
+Lemma 2.8. Let m, n ∈N with n ≥m. Define Γ by equation (4), d by equation (5), and ϕ
+by Algorithm 3 with k = m. Let ξ, ξ′ i.i.d.
+∼Unif(Ξn) with Y = generate(ξ; n, p, Γ) and eY = Y .
+Then almost surely
+P(ϕ(eY , ξ′) ≤ϕ(eY , ξ) | eY ) ≤2n exp
+
+−min{mα(eY )2/8, mα(eY )/4}
+
+.
+2.5.1
+Robustness to corruptions
+Showing high probability p-value upper bounds for corruptions of watermarked text that hold
+almost surely given the corrupted text—i.e., analogues of Lemmas 2.5 and 2.6—is more diffi-
+cult, primarily due to the fact that the summands in the alignment metric from equation (5)
+are no longer bounded and thus bounding the influence of each substitution and/or insertion
+operation on the test statistic requires more careful analysis. Of course, we could in principle
+tweak the alignment metric by truncating the summands in order to prove the analogous
+results; however, as the main intuitions would carry over from Lemmas 2.5 and 2.6 and the
+results are not critical to the main thrust of the paper, we do not carry this plan out.
+2.5.2
+What we run in practice
+As in the case of ITS, in practice we find using a slight variation of the alignment cost in
+equation (5) performs better. Namely, following the prescription of Aaronson [1], we modify
+the previous alignment cost to instead be
+d(y, ξ) :=
+k
+X
+i=1
+log(1 −ξi,yi).
+(6)
+Henceforth, we refer to this version of the watermarking strategy as EXP, and we refer to
+the corresponding Levenshtein version wherein we define the base alignment cost d0 by equa-
+tion (6) as EXP-edit.
+In summary, for EXP we use the decoder from equation (4), the test statistic from Algo-
+rithm 3 with the alignment cost from equation (6), and the watermark key distribution as the
+uniform distribution over Ξn, where recall n is the length of the watermark key sequence and
+Ξ = [0, 1]N. Meanwhile, EXP-edit differs from EXP only in that we define the test statistic
+using the Levenshtein cost from Definition 5 with the base cost again from equation (6).
+3
+Experimental results
+We empirically validate the statistical power of our watermarking strategies (i.e., ITS, ITS-
+edit, EXP, and EXP-edit) via experiments with the OPT-1.3B [28] and LLaMA-7B [22] mod-
+15
+
+els.9 We run experiments using generate rather than shift-generate, mainly for the sake
+of reproducibility; recall however that this choice has no impact on the p-values we report.
+We test for all watermarks using a block size k (in Algorithm 3) equal to the length m of
+the text. Following the methodology of Kirchenbauer et al. [13], we generate watermarked
+text continuations of prompts sampled from the news-like subset of the C4 dataset [16]. We
+vary the generation length m (Experiment 1) and the random number sequence length n
+(Experiment 2), and we report median p-values of watermarked text over 500 samples.10
+We also evaluate robustness to four kinds of paraphrasing attacks: randomly substituting
+a fraction of the generated tokens with tokens chosen uniformly at random from the vocab-
+ulary (Experiment 3); randomly inserting a fraction of tokens among the generated tokens
+(Experiment 4); randomly deleting a fraction of the generated tokens (Experiment 5); using
+another language model to translate the text from English to French and back (Experiment
+6). The first three attacks allow us to systematically vary the level of corruption, while the
+last attack is an example of an attack we might encounter in the wild. We defer the details
+of the translation procedures to Appendix D.2.
+Finally, using the Alpaca-7B model and evaluation dataset [19], we conduct a case-study
+on the feasibility of watermarking the responses of a performant instruction-tuned language
+model to user queries.
+We also show for certain kinds of instructions that hashing-based
+watermarks produce noticeably worse responses than our distortion-free watermarks, thus
+underlining the importance of the distortion-free property in practice.
+In all our experiments—except for Experiment 2, where the control variable n is a hyperpa-
+rameter that is unique to our watermarks—we also replicate the watermark of Kirchenbauer
+et al. [13] as a baseline, setting the greenlist fraction γ = 0.25 and varying the logit bias
+δ ∈{1.0, 2.0}.
+We respectively refer to these versions of their watermark as KGW-1.0 and
+KGW-2.0 after the first three authors’ last names. We emphasize their watermark is not di-
+rectly comparable to our watermarks as it is not distortion-free (e.g., Kirchenbauer et al. [13]
+report that even the weakest version we employ with δ = 1.0 and γ = 0.25 typically increases
+perplexity by 5–10%).
+In their work, Kirchenbauer et al. [13] report approximate p-values, which they obtain
+from computing the z-score of a certain test statistic. To ensure a fair comparison, we use
+detect (with T = 5000) to report p-values for all watermarks;11 in the case of KGW-1.0 and
+KGW-2.0, we run detect using the original inexact p-values they report as the test statistic.
+We report error bars for the median p-value based on a bootstrapped estimate of the standard
+deviation using 1000 resamples.
+Instead of recomputing the test statistic T times for each prompt—as we originally pre-
+scribe in detect—to save computation we simply sample T prompts and compute the test
+statistic once for each ground-truth length m completion; we then use the empirical distribu-
+tion of these test statistics as the reference distribution within detect, which gives a proper
+p-value with respect to the null hypothesis that the text is an original completion from the
+dataset. For reference, we include the full pseudocode for this modified version of detect in
+Appendix D.3, and we also plot the full distributions of p-values for nonwatermarked gen-
+erations (i.e., regular samples from the language models) to verify they are indeed roughly
+uniform over the interval [0, 1].
+9We will also at times collectively refer to ITS and ITS-edit as the ITS watermarks and/or strategies and
+EXP and EXP-edit as the EXP watermarks and/or strategies.
+10The median p-value corresponds to the significance level (i.e., Type I error rate) at which the power of our
+watermark detector is at least 0.5.
+11This setting of T means we never report p-values less than 1/5000 (i.e., 0.0002) in any of our experiments.
+16
+
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 2: Median p-value of watermarked text relative to varying the text length m, for
+OPT-1.3B and LLaMA-7B models. Our watermark strategies are competitive with those of
+Kirchenbauer et al. [13], despite the fact that they distort the text distribution to generate
+watermarked text whereas we do not.
+We defer further details regarding our experimental protocol to Appendix D.
+3.1
+Varying text and watermark key length
+We vary the length m of watermarked text in Figure 2, fixing the watermark key length
+n = 256 for each of our watermarks and setting γ = 0.4 for ITS-edit and γ = 0.0 for EXP-
+edit (see Appendix D.4 for the details of tuning γ). Our ITS watermarks slightly outperform
+KGW-1.0 while our EXP watermarks slightly outperform KGW-2.0, despite the fact that KGW-
+1.0 and KGW-2.0 both distort the text distribution. The EXP watermarks are notably more
+powerful than the ITS watermarks, requiring roughly two to three times fewer tokens to
+achieve a comparably low median p-value. One conceivable advantage of the ITS watermarks
+over the EXP watermarks is that they have comparatively less overhead: the watermark key
+for EXP and EXP-edit is a sequence of n vectors in [0, 1]N, where recall N is the size of the
+vocabulary, while for ITS and ITS-edit it is simply a sequence of n numbers in [0, 1]. All
+watermarking strategies perform worse on LLaMA-7B than OPT-1.3B, due to the fact that
+LLaMA-7B typically produces lower entropy text than OPT-1.3B. Due to the discrete nature
+of the test statistic of Kirchenbauer et al. [13], i.e., the number of tokens in the text belonging
+to a “greenlist” versus a “redlist”, the median p-values for the KGW-1.0 and KGW-2.0 watermarks
+are occasionally unstable, particularly for small values of m.
+We vary the length n of the watermark key sequence ξ in Figure 3 for different lengths m
+of watermarked text from the ITS and EXP watermarks respectively. Recall n corresponds to
+the total number of tokens we can generate while maintaining our distortion-free guarantee.
+As our theory predicts, the p-values of watermarked text grow linearly with n. The rate
+of growth is fairly mild and decreases rapidly with m; even for n = 4096, which is larger
+than the maximum generation length of both the OPT-1.3B and LLaMA-7B models, slightly
+increasing the number of tokens (by 4–8 tokens in the case of EXP, and 10–20 tokens in the
+case of ITS) suffices to distinguish watermarked text with roughly the same statistical power
+17
+
+as n = 64.
+(a) OPT-1.3B: ITS (solid) and ITS-edit (dashed)
+(b) LLaMA-7B: ITS (solid) and ITS-edit (dashed)
+(c) OPT-1.3B: EXP (solid) and EXP-edit (dashed)
+(d) LLaMA-7B: EXP (solid) and EXP-edit (dashed)
+Figure 3: Median p-value of watermarked text for varying the watermark key length n. Across
+all watermarks for both the OPT-1.3B and LLaMA-7B models, the median p-values grow
+linearly with n but decay rapidly with increasing text length m.
+3.2
+Robustness to corruption and paraphrasing
+We now proceed to evaluate the robustness of our watermark strategies to various forms of
+corruption and paraphrasing. We focus on comparing our strongest watermarks (EXP and EXP-
+edit) against KGW-2.0, deferring results for all other watermarks to Appendix D.5. As larger n
+increases the computational overhead of computing our test statistics and the effect of larger
+n on statistical power is mild (as shown in Figure 3), we run all experiments with n = 256,
+which in any case is sufficiently large to ensure the watermarked text across all experiments
+is distortion-free. Decreasing the insertion/deletion penalty γ improves robustness (at least
+up to a point) but hurts the statistical power of the ITS-edit and EXP-edit watermarks for
+larger n, since reducing the penalizer for edits effectively increases the number of candidate
+alignments under consideration. We run ITS-edit and EXP-edit with the same choices of γ
+as in the previous section. We defer the details of tuning γ to Appendix D.4.
+We vary the fraction of substituted tokens in Figure 4, and we vary the fraction of inserted
+18
+
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 4: Median p-value of watermarked text relative to the fraction of substitution errors,
+for OPT-1.3B and LLaMA-7B models with m = 35. Both versions of the EXP watermark
+significantly outperform KGW-2.0, again despite KGW-2.0 distorting the text distribution.
+and deleted tokens in Figures 5 and 6 respectively. For the insertion experiment, we pass only
+the first m tokens to the detector; similarly, for the deletion experiment, we initially generate
+more than m watermarked tokens so that even after deleting a fraction thereof, there are
+at least m tokens remaining. The EXP and EXP-edit watermarks are comparably robust to
+substitution errors, but the latter is far more robust to insertion and deletion errors.
+We compare our watermarks against the most robust version of KGW-2.0, in the sense that
+we hash only the previous token to determine the next token distribution and thus bias the
+distribution towards some subset of bigrams. If instead we hash the previous k tokens for
+k > 1, then substituting any one of the previous k tokens will break the watermark signal in
+a particular token, and thus the statistical power of their watermark will be worse than what
+we report in our experiments.
+Finally, in Figures 8 and 9 we implement a “roundtrip translation” attack, wherein we
+attempt to paraphrase watermarked texts of varying lengths by translating the (English) texts
+into another language (i.e., French and Russian respectively) and back again using a machine
+translation model (details in Appendix D.2). We include a representative example of the
+original and (re-)translated texts in Figure 7. Using Russian is a noticeably more effective
+attack than French: none of the watermarks aside from EXP-edit are able to reliably detect
+watermarked text with p < 0.05 irrespective of m. In fact, for Russian the power of both EXP
+and KGW-2.0 stagnates (or even diminishes) with increasing text length, perhaps due to the
+inherent ambiguity in translating longer texts.
+In many cases, both using French and Russian, the roundtrip translation still preserves
+large chunks of the original text, which suffices for watermark detection even using EXP,
+which is substantially less robust to insertion and deletion errors than EXP-edit. Aside from
+inspecting a few examples, we did not verify that the roundtrip translations preserve the basic
+semantics of the original text; thus, it is possible our results provide an overly pessimistic view
+of the robustness of our watermarks to these attacks, since in practice users would presumably
+not publish such examples. It is also possible that using different machine translation models—
+or more generally, different forms of automated paraphrasing—might be far more effective in
+19
+
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 5: Median p-value of watermarked text relative to the fraction of insertion errors, for
+OPT-1.3B and LLaMA-7B models with m = 35. EXP-edit is by far the most robust.
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 6: Median p-value of watermarked text relative to the fraction of deletion errors, for
+OPT-1.3B and LLaMA-7B models with m = 35. EXP-edit is again the most robust.
+20
+
+Figure 7: An illustrative example of a roundtrip translation attack via French. Given the
+first 50 tokens of the roundtrip translation (highlighted in green, in addition to the closest
+matching snippets to these tokens from the original text), detect returns bp ≤0.0002.
+evading watermark detection than those we employed. We publish the full set of watermarked
+generations for each watermarking strategy, along with their (roundtrip) translations, as part
+of our code release.
+3.3
+Case study: instruction following
+In the wild, most users interact with language models by prompting the model with instruc-
+tions (e.g., “give me code for...”), and the most widely-used language models (e.g., ChatGPT)
+are specifically fine-tuned to follow such instructions. Thus, using the instruction fine-tuned
+Alpaca-7B model, we presently conduct a case study on the effectiveness of watermarking
+a performant instruction following model. In particular, we sample 200 instructions from
+the Alpaca-7B evaluation dataset and generate watermarked responses of at most 200 tokens
+for each. We then compute conditionally valid p-values for each response using the original
+version of detect with T = 500. We also replicate the roundtrip translation attack from
+Experiment 6. We publish the full set of watermarked generations for each method, along
+with their (roundtrip) translations, and the instruction prompts as part of our code release.
+We plot the distribution of p-values for the EXP-edit and KGW-2.0 watermarks in Figure 10,
+as well as the p-values versus the watermark potential of the watermarked text in Figure 11. In
+general, the Alpaca-7B responses have considerably lower per-token watermark potential than
+both the OPT-1.3B and LLaMA-7B models, and thus the statistical power of our watermark
+is worse despite the responses typically being longer than in the previous experiments (i.e.,
+Experiments 1 and 6). In particular, based on the same random sample of 200 prompts (from
+the Alpaca evaluation set in the case of Alpaca-7B, and from the news-like subset of the C4
+dataset in the cases of LLaMA-7B and OPT-1.3B), the average per-token watermark poten-
+tial of text from Alpaca-7B is 0.28, compared to 0.59 for LLaMA-7B and 0.67 for OPT-1.3B.
+Unlike the previous experiments, KGW-2.0 noticeably outperforms the EXP-edit watermark.
+Figure 11 indicates this difference in performance is largely due to the fact KGW-2.0 distorts
+the distribution of the text and produces responses with noticeably larger watermark poten-
+tial than regular responses from the model. For responses whose unnormalized watermark
+21
+
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 8: Median p-value of watermarked text relative to the text length, after roundtrip
+translation via French, for OPT-1.3B and LLaMA-7B models with m = 35. EXP performs
+comparably to EXP-edit, indicating that the roundtrip translation attack tends to preserve
+at least some snippets of the original text.
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 9: Median p-value of watermarked text relative to the text length, after roundtrip
+translation via Russian, for OPT-1.3B and LLaMA-7B models with m = 35. In contrast to
+French, EXP-edit noticeably outperforms EXP. Overall, the attack is noticeably more effective
+than using French.
+22
+
+(a) EXP-edit
+(b) KGW-2.0
+Figure 10: Histogram of p-values of watermarked text from Alpaca-7B. KGW-2.0 is noticeably
+better than EXP-edit, though again the results are not strictly comparable as KGW-2.0 is not
+distortion-free.
+potential (i.e., watermark potential multiplied by the number of tokens in the response, to
+account for the varying lengths of the responses) exceeds roughly 60, both watermarks tend
+to yield p-values close to zero. Paraphrasing the responses via roundtrip translation attacks
+into both French and Russian degrades the statistical power of both watermarks, as we show
+in Figures 12 and 13.
+Finally, recall the main distinguishing feature of our watermark compared to Kirchenbauer
+et al. [13] and Aaronson [1] is that we do not hash previous tokens to determine the distribution
+of the next token. To demonstrate the pitfalls of hashing, we implement a version of the
+watermark Aaronson [1] proposes by modifying the generate method of EXP to obtain the
+vector ξi ∈[0, 1]N from seeding a random number generator using the previous k tokens
+instead of using the watermark key; we call this version EXP-hash. We then prompt Alpaca-
+7B with requests for various kinds of lists. Because Alpaca-7B tends to separate items in lists
+by the same recurring token, e.g., a comma or a newline character, and because this recurring
+token determines the next token, for k = 1 the lists degenerate into repetition (Figure 14).12
+From inspection, hashing with k > 1 substantially improves the quality of samples; how-
+ever, even using k = 4 can sometimes produce noticeably repetitive text. We reiterate that
+while increasing k may improve sample quality by making the distortions of watermarked text
+less noticeable, doing so harms the robustness of the watermark (e.g., replacing just 20% of
+the tokens would suffice to evade detection for k = 4). Moreover, using a more robust hash
+function does not avoid this trade-off between robustness and distortion-freeness, as there is
+a direct trade-off between the likelihood of a hash collision and the robustness of the hash.
+In addition to Figure 14, we include more examples (for both k = 1 and k = 4) and different
+prompts in Appendix D.5.5 and our code release.
+12The authors would like to pat themselves on the back by drawing the reader’s attention to the fact that
+the title of this paper is not among those suggested by Alpaca-7B.
+23
+
+(a) Scatterplot of p-values.
+(b) Histogram of watermark potential.
+Figure 11: Watermark potential versus statistical power of EXP-edit versus KGW-2.0. KGW-2.0
+noticeably distorts the text distribution, tending to produce higher watermark potential text
+overall than the original language model (and consequently, EXP-edit).
+(a) EXP-edit
+(b) KGW-2.0
+Figure 12: Histogram of p-values of watermarked text after roundtrip translation via French.
+KGW-2.0 outperforms EXP-edit, albeit by noticeably distorting the text distribution.
+24
+
+(a) EXP-edit
+(b) KGW-2.0
+Figure 13: Histogram of p-values of watermarked text after roundtrip translation via Russian.
+KGW-2.0 again does significantly better than EXP-edit.
+(a) EXP-hash
+(b) EXP
+Figure 14: Example responses from Alpaca-7B to the prompt: “Give me 20 ideas for the
+title of a paper on watermarking language models.” We generate (a) by hashing the previous
+token to determine the inputs to the EXP decoder, while (b) is a regular sample from our EXP
+strategy. Hashing causes the model to degenerate into repetition.
+25
+
+4
+Discussion
+In this paper, we give the first distortion-free watermarking strategies for language models
+that are robust to editing and/or cropping. The key idea underpinning our approach is to
+leverage methods for robust sequence alignment to align a putative watermarked text to a
+watermark key sequence which the LM provider uses to generate watermarked text. The
+statistical power of our watermarks improves exponentially with respect to the length of the
+text and diminishes only linearly with respect to the length of the watermark key sequence.
+The core assumption underlying watermarking is that the LM provider and the watermark
+detector coordinate by sharing information in advance, e.g., a watermark key. Indeed, the
+main inherent limitation of watermarking is that the detector must trust the LM provider
+to faithfully apply the watermark when generating text. A second limitation, which is not
+inherent to watermarking language models but does presently apply to all known watermarks,
+is that the LM provider cannot release the model weights, since then users could simply
+query the model directly instead of through the LM provider. Planting robust watermarks
+directly into the weights of a language model without degrading the quality of the model is
+an important direction for future work.
+4.1
+Trade-offs among watermarks
+Hashing-based watermarks [1, 13, 5] incur a direct trade-off between the degree of distortion
+versus robustness: larger hash windows reduce distortion but hurt robustness.
+We avoid
+sacrificing distortion-freeness for robustness by choosing to formulate watermark detection
+as a sequence alignment problem; however, this design choice introduces a new trade-off:
+the computational complexity of our watermark detection algorithms grows linearly with
+the length of the watermark key sequence. In contrast, the complexities of the watermark
+detection algorithms of both Christ et al. [5] and also Aaronson [1] and Kirchenbauer et al.
+[13] depend (in essence) only on the length of the input text. Just as the watermark key
+length imposes a cap on both the total number of distortion-free watermarked tokens the
+LM provider may generate for a single query as well as the expected total they can generate
+across multiple queries before reusing a part of the key sequence, the the window size imposes
+a cap on the number of (distortion-free) tokens one can expect to generate using a hashing-
+based watermark without incurring a hash collision. Whether this apparent tension between
+detection complexity, robustness and (approximate) distortion-freeness is due to fundamental
+trade-offs is an interesting open question.
+To illustrate how these trade-offs manifest in practice, suppose an LM provider responds
+with m = 100 tokens to a sequence of T = 10 user queries (which may be adaptively chosen).
+Recall from Section 2.2 that we must set the key length n = ω(mT 2) to achieve approximate
+distortion-freeness using our watermarks, where here mT 2 = 10000; for n = 10000, the
+runtimes13 of our implementation of the test statistics for ITS, ITS-edit, EXP, EXP-edit are
+0.004 ± 0.0002, 0.60 ± 0.01, 2.20 ± 0.01 and 3.21 ± 0.01 seconds respectively.14
+13We report average runtimes and the associated standard deviations across 5 calls on an Apple M2 Macbook
+Pro Laptop. We include benchmarking scripts with our code release.
+14In principle, running detect requires recomputing the test statistic for each resampled watermark key in
+order to obtain an exact p-value. However, as we discuss in Section D and Appendix D.3, we can avoid this
+recomputation and still obtain approximate p-values with respect to some reference distribution of unwater-
+marked text, in which case we need only compute the single test statistic once (using the original watermark
+key) during watermark detection (Algorithm 5).
+26
+
+In order to achieve approximate distortion-freeness using a hashing-based watermark in the
+same setting, the LM provider must set the window size k to be sufficiently large as a function
+of m and T. For example, Christ et al. [5] argue that the probability of incurring the same
+sequence of tokens twice decays exponentially with the observed entropy of the token sequence
+(which will depend on the previous tokens); thus, they dynamically adjust the window size k
+during generation to ensure the observed entropy of the constituent tokens in the window is
+sufficiently large such that the probability of a hash collision with any of the other windows
+is negligible across all mT tokens. Specifically, letting h denote the expected observed per-
+token entropy (i.e., log-probability), the typical window size for a hashing-based watermark
+would need to be at least k ≈log mT
+h
+in order to ensure approximate distortion-freeness in our
+setting. Concretely, in the setting of Section 3.3, we have h ≈0.70 for Alpaca-7B, in which
+case such a hashing-based watermark would not be robust to replacing more than roughly
+10% of watermarked tokens.
+4.2
+Recommendations in practice and combining watermarks
+We conclude with some salient recommendations for practitioners aiming to watermark their
+deployed language models. First, though in principle the length of the watermark key se-
+quence n—which recall imposes a cap on the total number of distortion-free watermarked
+tokens the LM provider can generate—can grow (nearly) exponentially in the block size k of
+the test statistic while still enabling watermark detection from as few as k tokens, in practice
+we find that using a fairly small watermark key sequence (e.g., n = 256) does not noticeably
+affect the quality of watermarked text (i.e., even when generating more than n tokens total)
+while allowing for fast detection and improved robustness. In settings where robustness is
+important (e.g., discouraging students from using a language model for homework assistance)
+we recommend practitioners use our EXP-edit watermark, as it is by far the most robust wa-
+termark of those we tested. Meanwhile, in settings where throughput of detection is important
+(e.g., scrubbing synthetic text from a large training corpus), we recommend practitioners use
+our ITS watermark: its detection is essentially an instance of maximum inner-product search,
+a problem for which there exist various fast implementations and indexing structures (e.g.,
+via vector databases).
+Finally, we remark that for certain hashing-based watermarks we can combine our wa-
+termark with the hashing-based watermark to generate watermarked text that is detectable
+using either of the two corresponding watermark detection algorithms. For example, we can
+use the hashing-based watermark of Kirchenbauer et al. (2023), which biases the distribution
+of the next token by upweighting certain logits over others, to determine the distribution of
+the next token and then use our watermarks to sample from this next token distribution.
+One can then later determine which detection procedure to run for a collection of putative
+watermarked text depending on whether throughput or robustness is a higher priority. Simi-
+larly, we can combine our watermarks with the watermark of Christ et al. [5] by alternating
+tokens between the watermarks (and only hashing the alternate tokens). The resulting water-
+marked text will be approximately distortion-free since both watermarks are approximately
+distortion-free. One can choose between the two detection procedures to optimize precision
+versus recall in adversarial settings; in particular, the watermark of Christ et al. [5] is hard to
+spoof (due to its multi-query undetectability guarantee) while our watermarks are harder to
+remove (due to our robustness guarantees). Exploring such combinations of watermarks with
+complementary strengths is an exciting direction for future work.
+27
+
+Acknowledgement
+We thank Saminul Haque, Gary Cheng and Padma Kuditipudi for pointing out errors in pre-
+liminary drafts of this work and for their helpful feedback in general. This work is supported
+by an Open Philanthropy Project Award (OpenPhil) and an NSF Frontier Award (NSF Grant
+no. 1805310).
+References
+[1] S. Aaronson.
+‘Reform’ AI Alignment with Scott Aaronson.
+AXRP - the AI
+X-risk Research Podcast,
+2023.
+URL https://axrp.net/episode/2023/04/11/
+episode-20-reform-ai-alignment-scott-aaronson.html.
+[2] S. Abdelnabi and M. Fritz. Adversarial watermarking transformer: Towards tracing text
+provenance with data hiding. In IEEE Symposium on Security and Privacy, 2021.
+[3] M. J. Atallah, V. Raskin, M. Crogan, C. Hempelmann, F. Kerschbaum, D. Mohamed,
+and S. Naik. Natural language watermarking: Design, analysis, and a proof-of-concept
+implementation. In Information Hiding: 4th International Workshop, IH 2001 Pitts-
+burgh, PA, USA, April 25–27, 2001 Proceedings 4, pages 185–200. Springer, 2001.
+[4] T. Brown, B. Mann, N. Ryder, M. Subbiah, J. D. Kaplan, P. Dhariwal, A. Neelakantan,
+P. Shyam, G. Sastry, A. Askell, et al. Language models are few-shot learners. Advances
+in Neural Information Processing Systems 33, 33:1877–1901, 2020.
+[5] M. Christ, S. Gunn, and O. Zamir. Undetectable watermarks for language models. arXiv
+preprint arXiv:2306.09194, 2023.
+[6] F. Dai and Z. Cai. Towards near-imperceptible steganographic text. In Proceedings of the
+57th Annual Meeting of the Association for Computational Linguistics, pages 4303–4308,
+2019.
+[7] G. Elfving, G. Birkhoff, and R. von Mises. Vol. 2. probability and statistics, General. In
+Selected Papers of Richard von Mises. American Mathematical Society, 1966.
+[8] X. He, Q. Xu, L. Lyu, F. Wu, and C. Wang. Protecting intellectual property of lan-
+guage generation APIs with lexical watermark. In Proceedings of the Thirty-Sixth AAAI
+Conference on Artificial Intelligence, 2022.
+[9] X. He, Q. Xu, Y. Zeng, L. Lyu, F. Wu, J. Li, and R. Jia. Cater: Intellectual property
+protection on text generation apis via conditional watermarks. In Advances in Neural
+Information Processing Systems 35, 2022.
+[10] G. Jawahar, M. Abdul-Mageed, and V. Laks Lakshmanan. Automatic detection of ma-
+chine generated text: A critical survey. In International Conference on Computational
+Linguistics, 2020.
+[11] N. S. Kamaruddin, A. Kamsin, L. Y. Por, and H. Rahman. A review of text watermark-
+ing: theory, methods, and applications. IEEE Access, 2018.
+[12] S. Katzenbeisser and F. Petitcolas. Digital watermarking. Artech House, London, 2:2,
+2000.
+28
+
+[13] J. Kirchenbauer, J. Geiping, Y. Wen, J. Katz, I. Miers, and T. Goldstein. A watermark
+for large language models. arXiv preprint arXiv:2301.10226, 2023.
+[14] E. Mitchell, Y. Lee, A. Khazatsky, C. D. Manning, and C. Finn.
+Detectgpt: Zero-
+shot machine-generated text detection using probability curvature.
+arXiv preprint
+arXiv:2301.11305, 2023.
+[15] G. Papandreou and A. L. Yuille. Perturb-and-map random fields: Using discrete op-
+timization to learn and sample from energy models. 2011 International Conference on
+Computer Vision, pages 193–200, 2011.
+[16] C. Raffel, N. Shazeer, A. Roberts, K. Lee, S. Narang, M. Matena, Y. Zhou, W. Li, and
+P. J. Liu. Exploring the limits of transfer learning with a unified text-to-text transformer.
+The Journal of Machine Learning Research, 21(1):5485–5551, 2020.
+[17] S. G. Rizzo, F. Bertini, and D. Montesi. Fine-grain watermarking for intellectual property
+protection. EURASIP Journal on Information Security, 2019.
+[18] J. Shen, H. Ji, and J. Han. Near-imperceptible neural linguistic steganography via self-
+adjusting arithmetic coding. In Proceedings of Empirical Methods for Natural Language
+Processing, pages 303–313, 2020.
+[19] R. Taori, I. Gulrajani, T. Zhang, Y. Dubois, X. Li, C. Guestrin, P. Liang, and T. B.
+Hashimoto. Stanford alpaca: An instruction-following llama model. https://github.
+com/tatsu-lab/stanford_alpaca, 2023.
+[20] J. Tiedemann and S. Thottingal. OPUS-MT — Building open translation services for
+the World. In Proceedings of the 22nd Annual Conference of the European Association
+for Machine Translation, 2020.
+[21] J. Tiedemann, M. Aulamo, D. Bakshandaeva, M. Boggia, S.-A. Gr¨onroos, T. Niemi-
+nen, A. Raganato, Y. Scherrer, R. Vazquez, and S. Virpioja. Democratizing machine
+translation with opus-mt. arXiv preprint arXiv:2212.01936, 2022.
+[22] H. Touvron, T. Lavril, G. Izacard, X. Martinet, M.-A. Lachaux, T. Lacroix, B. Rozi`ere,
+N. Goyal, E. Hambro, F. Azhar, et al. Llama: Open and efficient foundation language
+models. arXiv preprint arXiv:2302.13971, 2023.
+[23] H. Ueoka, Y. Murawaki, and S. Kurohashi.
+Frustratingly easy edit-based linguistic
+steganography with a masked language model. In Proceedings of the 2021 Conference of
+the North American Chapter of the Association for Computational Linguistics: Human
+Language Technologies, 2021.
+[24] A. Venugopal, J. Uszkoreit, D. Talbot, F. J. Och, and J. Ganitkevitch. Watermarking the
+outputs of structured prediction with an application in statistical machine translation.
+In Proceedings of Empirical Methods for Natural Language Processing, 2011.
+[25] J. Vincent.
+AI-generated answers temporarily banned on coding Q&A site Stack
+Overflow. The Verge, 2022. URL https://www.theverge.com/2022/12/5/23493932/
+chatgpt-ai-generated-answers-temporarily-banned-stack-overflow-llms-dangers.
+[26] M. J. Wainwright. High-Dimensional Statistics: A Non-Asymptotic Viewpoint. Cam-
+bridge University Press, 2019.
+29
+
+[27] X. Yang, J. Zhang, K. Chen, W. Zhang, Z. Ma, F. Wang, and N. Yu. Tracing text
+provenance via context-aware lexical substitution.
+In Proceedings of the Thirty-Sixth
+AAAI Conference on Artificial Intelligence, 2022.
+[28] S. Zhang, S. Roller, N. Goyal, M. Artetxe, M. Chen, S. Chen, C. Dewan, M. Diab, X. Li,
+X. V. Lin, et al. Opt: Open pre-trained transformer language models. arXiv preprint
+arXiv:2205.01068, 2022.
+[29] X. Zhao, Y.-X. Wang, and L. Li. Protecting language generation models via invisible
+watermarking. arXiv preprint arXiv:2302.03162, 2023.
+[30] Z. Ziegler, Y. Deng, and A. M. Rush. Neural linguistic steganography. In Proceedings of
+Empirical Methods for Natural Language Processing, pages 1210–1215, 2019.
+A
+Proof of Lemma 2.2
+Proof. To show the claim, we first lower bound the probability that Y = Y ′. In particular,
+P(Y = Y ′) =
+X
+y
+P(Y = y)P(Y ′ = y)
+=
+X
+y
+P(Y = y)
+Y
+i∈[m]
+p(yi | y:i−1)
+=
+X
+y
+P(Y = y)
+Y
+i∈[m]
+(1 −(1 −p(yi | y:i−1)))
+(⋆)
+≥
+X
+y∈Vc
+P(Y = y) exp
+
+−c
+X
+i∈[m]
+1 −p(yi | y:i−1)
+
+
+≥E [exp (−cmα(Y )) 1{Y ∈Vc}] ,
+where (⋆) follows from exp(−cx) ≤1 −x for 0 ≤x ≤1 −exp(−c/2).
+It then follows
+immediately that we can bound the total variation distance between the joint distributions
+of (Y, ξ) and (Y ′, ξ) by
+DTV ((Y, ξ)||(Y ′, ξ)) ≤P((Y, ξ) ̸= (Y ′, ξ))
+≤1 −E [exp (−cmα(Y )) 1{Y ∈Vc}] .
+Observe for any event A that
+DTV ((Y, ξ)||(Y ′, ξ)) ≥P((Y, ξ) ∈A) −P((Y ′, ξ) ∈A),
+and thus, combining the previous two displays, we have
+P((Y, ξ) ∈A) + P((Y ′, ξ) /∈A) ≥P((Y, ξ) ∈A) + P((Y, ξ) /∈A) −DTV ((Y, ξ)||(Y ′, ξ))
+≥E [exp (−cmα(Y )) 1{Y ∈Vc}] .
+The desired result thus follows from letting A be the event that h predicts −1.
+30
+
+B
+Analysis of inverse transform sampling
+We first introduce the following supporting lemma. Recall C0 = Var(η(Unif([N]))) for η(i) =
+(i −1)/(N −1).
+Lemma B.1. Let µ ∈∆([N]). Let (U, π) ∼Unif([0, 1]) × Unif(Π) and Y = Γ((U, π), µ).
+Then
+1
+C0 Cov(U, η(π(Y )) | Y ) = 1 −µ(Y ) almost surely.
+Proof. We first characterize the conditional distribution of π given Y and the conditional
+distribution of U given both π and Y , where recall π and Y are discrete. Applying Bayes’
+formula and Theorem 1, we have
+P(π | Y ) = P(Y | π)P(π)
+P(Y )
+(⋆)
+= µ(Y )P(π)
+P(Y )
+= P(π).
+(7)
+Also, defining the interval
+I(Y, π) := [µ({y : π(y) < π(Y )}), µ({y : π(y) ≤π(Y )})] ,
+for any interval I ⊂[0, 1] we have
+P(U ∈I | Y, π)
+(a)
+= P(Y | U ∈I, π)P(U ∈I)P(π)
+µ(Y )P(π)
+(b)
+= |I ∩I(Y, π)|
+µ(Y )
+(c)
+= |I ∩I(Y, π)|
+|I(Y, π)|
+,
+(8)
+where (a) follows from Bayes’ formula and the independence of U and π; (b) follows from the
+definition (1) of the decoder Γ; and (c) follows from I(Y, π) ⊂[0, 1] having width equal to µ(Y ).
+The displays (7) and (8) respectively imply π | Y ∼Unif(Π) and U | π, Y ∼Unif(I(Y, π)),
+from which it follows that
+E [U | Y, π(Y )] = E
+
+µ({y : π(y) < π(Y )}) + |I(Y, π)|
+2
+ Y, π(Y )
+
+= (π(Y ) −1) (1 −µ(Y ))
+n −1
++ µ(Y )
+2
+= 1/2 + (η(π(Y )) −1/2) (1 −µ(Y )) .
+By symmetry, we have E[U] = E[η(π(Y ))] = 1/2, the former because P(Y | U) = P(Y | 1−U)
+for any U and the latter because recall π | Y is uniform over Π. Thus, marginalizing the
+preceding display over π(Y ) gives
+Cov(U, η(π(Y )) | Y ) = E [(U −1/2) (η(π(Y )) −1/2) | Y ]
+= (1 −µ(Y ))Var(η(π(Y )) | Y ),
+from which the desired result follows immediately from recalling π(Y ) | Y ∼Unif([N]) and
+the definition of the constant C0.
+B.1
+Proof of Lemma 2.3
+Proof. Recall by definition
+d(Yi, ξi) = −(Ui −1/2) · (η(πi(Yi)) −1/2),
+where (as in the proof of Lemma B.1) we have E[Ui | Y ] = E[η(πi(Yi)) | Y ] = 1/2. Lemma B.1
+thus implies E[d(Yi, ξi) | Y ] = −C0 · (1 −p(Yi | Y:i−1)), while trivially E[d(Yi, ξ′
+j) | Y ] = 0 as
+Y and ξ′ are independent. The result follows immediately.
+31
+
+B.2
+Proof of Lemma 2.4
+We prove the following more general result, from which Lemma 2.4 follows as a corollary.
+Lemma B.2. Let m, n ∈N with n ≥m, where m is the generation length and n is the water-
+mark key length. Define the decoder Γ by equation (1), alignment score d by equation (2), and
+ϕ by Algorithm 3 with block size k ≤m. Let ξ, ξ′ i.i.d.
+∼Unif(Ξn) with Y = generate(ξ; n, p, Γ).
+Let eY be a substring of Y of length at least k that is conditionally independent of ξ and ξ′
+given Y , i.e., eY = Yτ+1:τ+ℓfor ℓ≥k. Then for bα := 1 −1
+k
+Pτ+k
+i=τ+1 p(Yi | Y:i−1), almost surely
+P(ϕ(eY , ξ′) ≤ϕ(eY , ξ) | eY , Y ) ≤2n exp
+ −kC2
+0 bα2/2
+
+.
+Proof. Recall by definition
+d(y, (u, π)) = −
+len(y)
+X
+i=1
+(ui −1/2) · (η(πi(yi)) −1/2),
+(9)
+Lemma 2.3 and the conditional independence of τ and ξ given Y imply for any j ∈[n] that
+E[d(eY1:k, ξ′
+(j+1:j+k)%n) | Y, eY ] −E[d(eY1:k, ξτ+1:τ+k) | Y, eY ] = kC0bα.
+Each summand in equation (9) lies between −1/4 and 1/4, and also (Ui, πi) is conditionally
+independent of U−i and π−i given Y . Thus, Hoeffding’s inequality [26, Proposition 2.5] implies
+for j ∈[n] that
+P
+
+d(eY , ξ′
+(j+1:j+k)%n) ≤d(eY , ξτ+1:τ+k) | Y, eY
+
+≤P
+
+d(eY , ξ1:m) −E[d(eY , ξ1:m)] ≥kC0bα/2 | Y, eY
+
++ P
+
+E[d(eY , ξ′
+j+1:j+m)] −d(eY , ξ′
+j+1:j+m) ≥kC0bα/2 | Y, eY
+
+≤2 exp
+ −mC2
+0 bα2/2
+
+.
+Recalling the definition of the test statistic ϕ via Algorithm 3, the main claim then follows
+from taking a union bound over all j ∈[n].
+B.3
+Proof of Lemma 2.5
+Proof. We begin with the following observation for a single token.
+Observation B.1. Let P ∈∆([N]). Let (U, π) ∼Unif([0, 1])×Unif(Π) and Y = Γ((U, π), P).
+Let eY ∈[N] be conditionally independent of (U, π) given Y . If eY ̸= Y , then almost surely
+Cov(U, η(π(eY )) | Y, eY ) = −
+1
+N −1Cov(U, η(π(Y )) | Y, eY ).
+Proof of Observation B.1. Observe the conditional distribution of π(eY ) given Y is uniform
+over [N] \ {π(Y )}. Let X be a random variable that is equal to η(π(Y )) with probability
+1/N and otherwise equal to η(π(eY )). Observe X is independent of Y and thus also U by
+assumption—in particular, (N −1)X + 1 | Y ∼Unif([N]) irrespective of the value of Y . The
+claim thus follows from rearranging terms in the equality
+0 = Cov(U, X | Y, eY ) = 1
+N Cov(U, η(π(Y )) | Y, eY ) + N −1
+N
+Cov(U, η(π(eY )) | Y, eY ).
+32
+
+Lemma 2.3 and Observation B.1 together imply for any j ∈[n] that
+E[d(eY , ξ′
+j+1:j+m) | eY , Y ] −E[d(eY , ξ1:m) | eY , Y ] = mC0eα(Y, eY ),
+i.e., by adding the two results together using Observation B.1 to account for the influence of
+each substituted token on the expectation. Using the same concentration argument as in the
+proof of Theorem 2.4, we then have
+P
+
+d(eY , ξ′
+j+1:j+m) ≤d(eY , ξ1:m) | eY , Y
+
+≤P
+
+d(eY , ξ1:m) −E[d(eY , ξ1:m)] ≥meα(Y, eY )/2 | eY , Y
+
++ P
+
+E[d(eY , ξ′
+j+1:j+m)] −d(eY , ξ′
+j+1:j+m) ≥meα(Y, eY )/2 | eY , Y
+
+≤2 exp
+
+−mC2
+0 eα(Y, eY )2/2
+
+.
+Recalling the definition of the test statistic ϕ via Algorithm 3, the main claim then follows
+from taking a union bound over all j ∈[n] and recalling k = m by assumption.
+B.4
+Proof of Lemma 2.6
+Proof. We begin with the following useful facts about edit distance. Throughout, let S(y)
+denote the set of substrings of a string y ∈V∗, including the empty string.
+Observation B.2. Let y, ey ∈V∗. Then dedit(y, ey) is the length of the smallest sequence of
+insertion and/or deletion operations to obtain ey from y.
+Proof of Observation B.2. We proceed via induction on the sum len(y) + len(ey). The base
+case where y and ey are both empty is trivial. Now suppose the claim holds all strings whose
+lengths sum to at most len(y) + len(ey) −1. Recalling the definition of dedit (Definition 4),
+there are three cases.
+First, suppose dedit(y, ey) = dedit(y2:, ey2:). Then by induction there exists a sequence of
+dedit(y, ey) insertion and/or deletion operations to obtain ey2: from y2:. Because y1 = ey1, the
+same sequence suffices to obtain ey from y and thus the claim follows.
+Second, suppose dedit(y, ey) = 1+dedit(y2:, ey). Again by induction, there exists a sequence of
+dedit(y, ey)−1 insertion and/or deletion operations to obtain ey from y2:. It follows immediately
+(i.e., by first deleting y1) there exists a sequence of dedit(y, ey) such operations to obtain ey from
+y, and so the claim holds.
+The third case follows by symmetry with the second case.
+Observation B.3. Let y, ey ∈V∗. Then for any τ < len(y), we have
+dedit(y, ey) ≥
+min
+y′∈S(ey) dedit(y:τ, y′) + min
+y′∈S(ey) dedit(yτ+1:, y′).
+Proof of Observation B.3. Observation B.2 implies there exists a sequence of dedit(y, ey) in-
+sertion and/or deletion operations to obtain ey from y. We may partition this sequence of
+operations into sequences based respectively on whether they occur on y:τ or yτ+1:. Let eypre
+be the result of performing the first sequence of operations on y:τ and let eysuf be the result of
+performing the second sequence of operations on yτ+1:. Then ey is the concatenation of eypre
+and eysuf, and so the claim follows from the fact that
+dedit(y, ey) = dedit(y:τ, eypre) + dedit(yτ+1:, eysuf)
+33
+
+≥
+min
+y′∈S(ey) dedit(y:τ, y′) + min
+y′∈S(ey) dedit(yτ+1:, y′).
+Observation B.4. Let y, ey ∈V∗and ξ ∈Ξ∗. Then dγ(y, ξ) ≤γdedit(y, ey) + dγ(ey, ξ).
+Proof of Observation B.4. The case dedit(y, ey) = 0 is trivial as we then have y = ey. Now
+suppose dedit(y, ey) = 1, and let i be the first index such that yi ̸= eyi. Then, unrolling the
+recursive definition of dγ(eyi:, ξj:), there must exist c ∈R and an index j such that both
+dγ(ey, ξ) = c + dγ(eyi:, ξj:) and dγ(y, ξ) ≤c + dγ(yi:, ξj:). Moreover, from the definition of edit
+distance, either yi+1: = eyi: or vice versa.
+We claim dγ(yi:, ξj:) ≤dγ(eyi:, ξj:) + γ. If yi+1: = eyi:, then the claim obtains as
+dγ(yi:, ξj:) ≤dγ(yi+1:, ξj:) + min
+ξ′∈Ξ d0(yi, ξ′) + γ
+(⋆)
+≤dγ(yi+1:, ξj:) + γ
+= dγ(eyi:, ξj:) + γ,
+with (⋆) following from the fact that d0(yi, ξ′) = 0 for ξ′ = (1/2, π) irrespective of yi and π.
+Otherwise, if yi: = eyi+1:, then from unrolling the recursive definition of dγ(eyi:, ξj:) there
+must exist some index j′ ≥j such that either
+dγ(eyi:, ξj:) = dγ(eyi+1:, ξj′:) + γ + min
+ξ′∈Ξ d0(eyi, ξ′) +
+X
+j≤ℓ<j′
+γ + min
+y′∈V d0(y′, ξℓ)
+or
+dγ(eyi:, ξj:) = dγ(eyi+1:, ξj′+1:) + d0(eyi, ξj′) +
+X
+j≤ℓ<j′
+γ + min
+y′∈V d0(y′, ξℓ).
+In the first case, we have γ + minξ′∈Ξ d0(eyi, ξ′) > 0 since γ > 1/2 by assumption, and so the
+claim follows as
+dγ(yi:, ξj:) ≤dγ(yi:, ξj′:) +
+X
+j≤ℓ<j′
+γ + min
+y′∈V d0(y′, ξℓ)
+= dγ(eyi+1, ξj′:) +
+X
+j≤ℓ<j′
+γ + min
+y′∈V d0(y′, ξℓ)
+< dγ(eyi:, ξj:).
+In the second case, we have d0(eyj) the claim follows as
+dγ(yi:, ξj:) ≤dγ(yi:, ξj′+1:) +
+X
+j≤ℓ<j′+1
+γ + min
+y′∈V d0(y′, ξℓ)
+= dγ(eyi+1, ξj′+1:) +
+X
+j≤ℓ<j′+1
+γ + min
+y′∈V d0(y′, ξℓ)
+≤dγ(eyi:, ξj:) + γ.
+Thus, assuming dedit(y, ey) ≤1, we have shown dγ(yi:, ξj:) ≤dγ(eyi:, ξj:) + γ, from which
+it follows that dγ(y, ξ) ≤dγ(ey, ξ) + γ. The general result follows immediately by applying
+Observation B.2 and summing the bound for a single edit over the (smallest) sequence of edits
+to obtain ey from y.
+34
+
+Proceeding with the main proof, define for convenience the quantity
+bατ := 1
+k
+k
+X
+i=1
+p(Yτ+i | Y:τ+i−1).
+Observe
+α(Y ) = k
+m
+m/k−1
+X
+τ=0
+bαkτ,
+(10)
+while Observation B.3 together with our assumption that dedit(Y, eY ) ≤εm implies
+k
+m
+m/k−1
+X
+τ=0
+min
+Y ′∈S(eY )
+dedit(Ykτ+1:kτ+k, Y ′) ≤kε.
+(11)
+The displays (10) and (11) together imply there exists an index τ and Y ′ ∈S(eY ) such that
+bατ −1
+k minY ′∈S(eY ) dedit(Yτ+1:τ+k, Y ′) ≥α(Y ) −ε. Reusing the same concentration argument
+as in the proof of Theorem 2.4, for t ≥0 we have
+P (d0(Yτ+1:τ+k, ξτ+1:τ+k) ≥−k (C0bατ + t) | Y ) ≤exp
+ −2kt2
+,
+and thus from Observation B.4 it follows that
+P
+
+dγ(Y ′, ξτ+1:τ+k) ≥−k (C0α(Y ) −γε + t) | eY , Y
+
+≤exp
+ −2kt2
+.
+Letting t = (C0α −γε)/2 and recalling the definition of the test statistic, we have
+P
+
+ϕ(eY , ξ) ≥−k (C0α(Y ) −γε) /2 | eY , Y
+
+≤exp
+ −k(C0α(Y ) −γε)2
++/2
+
+.
+(12)
+All that remains to bound the probability of ϕ(eY , ξ′) exceeding the threshold from the
+above display. To this end, define the set-valued map Nβ(y) := {y′ : dedit(y, y′) ≤β/(4γ−1)}.
+Then we make the following observation.
+Observation B.5. For any y ∈V∗and ξ ∈Ξ∗, there exists y′ ∈Nlen(ξ)(y) such that
+dγ(y, ξ) = γ · dedit(y, y′) + d0(y′, ξ).
+Proof. We proceed via induction. The base case where y and ξ both have length 1 follows
+trivially by taking y′ = y; in particular, γ > 1/2 implies d(y, ξ) ≤γ+miny′ d(y′, ξ) and likewise
+d(y, ξ) ≤γ + minξ′ d(y, ξ′). Now suppose the result holds so long as len(y) + len(ξ) ≤n −1.
+We claim that the result must then also hold if the lengths sum to at most n.
+We prove this inductive claim by considering three exhaustive cases. First, suppose that
+dγ(y, ξ) = dγ(y2:, ξ2:) + d(y1, ξ1). By our induction hypothesis, there exists ˆy ∈Nlen(ξ)−1(y2:)
+such that dγ(y2:, ξ2:) = γ ·dedit(y2:, ˆy)+d(ˆy, ξ2:). The desired result then obtains with y′ as the
+concatenation of y1 and ˆy. Second, suppose dγ(y, ξ) = dγ(y, ξ2:) + minξ′∈Ξ d(y1, ξ′) + γ. By
+our induction hypothesis, there exists ˆy ∈Nlen(ξ)=1(y) such that dγ(y2:, ξ) = γ · dedit(y2:, ˆy) +
+d(ˆy, ξ2:). The result obtains with y′ = ˆy. Finally, suppose dγ(y, ξ) = dγ(y2:, ξ) + d(y′′, ξ1) + γ
+for some y′′ ∈V.
+By our induction hypothesis, there exists ˆy ∈Nlen(ξ)−1(y) such that
+dγ(y2:, ξ) = γ · dedit(y2:, ˆy) + d(ˆy, ξ). The result then obtains by concatenating y′′ with by.
+35
+
+Let Ij := {(j + i)%n}k
+i=1. For any 0 ≤i ≤len(eY ) −k and j ∈[n], Observations B.4
+and B.5 together imply that
+dγ(eYi+1:i+k, ξ′
+Ij) =
+min
+y∈Nk(eYi+1:i+k)
+γ · dedit(eYi+1:i+k, y) + d0(y, ξ′
+Ij)
+(13)
+(⋆)
+=
+min
+y∈Nk/4(γ−1)(eYi+1:i+k)
+γ · dedit(y, eYi+1:i+k) + d0(y, ξ′
+Ij),
+(14)
+where (⋆) follows from the fact that dedit(eYi+1:i+k, y) > k/4(γ −1) implies
+γ · dedit(eYi+1:i+k, y) + d0(y, ξ′
+Ij) ≥k/4 > d0(eYi+1:i+k, ξ′
+Ij),
+and therefore the minimizer in equation (13) must be an element of Nk/4(γ−1)(eYi+1:i+k).
+By construction, Nβ(y) consists of the set of strings obtainable from y by a sequence of at
+most β insertion and/or deletion operations. Now define another set-valued map Nβ,−(y) as
+the restriction of Nβ(y) such that we may only insert a particular token into y (which token
+is immaterial). As the specific identity of each token we insert into y can only influence the
+value of dγ by ±1/2, for any β it follows that
+min
+y∈Nβ(eYi+1:i+k)
+γ · dedit(y, eYi+1:i+k) + d0(y, ξ′
+Ij) ≥
+min
+y∈Nβ,−(eY )
+d0(y, ξ′
+Ij),
+and so, letting β = k/4(γ −1), from equation (14) we have
+dγ(eYi+1:i+k, ξ′
+Ij) ≥
+min
+y∈Nβ,−(eYi+1:i+k)
+d0(y, ξ′
+Ij)
+Let eY (i, ℓ) denote the ℓ-th element of Nβ,−(eYi+1:i+k) for some eY -measurable indexing. From
+the independence of eY and ξ′, we have E[d0(eY (i, ℓ), ξIj) | eY ] = 0 for any ℓand j.
+The
+cardinality of Nβ,−(eYi+1:i+k) is equal to the number of possible combinations of locations for
+β insertion and/or deletion operations on eY , of which there are at most (k + β)β ≤(2k)β.
+Thus, applying the same concentration argument as in the proof of Theorem 2.4 and taking
+a union bound over all i ≤m −k, j ≤n and ℓ≤(2k)β, we have
+P(ϕ(eY , ξ′) ≤−α(Y )/2 + γε | eY , Y ) ≤mn(2k)k/(4γ−1) exp(−kC2
+0(α(Y ) −γε)2
++/2).
+(15)
+Combining the displays (12) and (15) via another union bound gives the desired result.
+C
+Analysis of exponential minimum sampling
+To prove the main theorems, we introduce the following supporting lemma. The result is well
+known and we restate it here only for completeness.
+Lemma C.1. Let µ ∈∆([N]) and ξ ∼Unif([0, 1]N). Then for any y ∈[N] we have
+P(Γ(ξ, µ) = y, −log(ξy)/µ(y) ≥t) = µ(y) exp(−t).
+Proof. Suppose µ(y) > 0 as otherwise the claim is trivial. Recalling ξi
+i.i.d.
+∼Unif([0, 1]), for
+any λ > 0 we have −λ log ξi
+i.i.d.
+∼Exp(λ), i.e.,
+P(−λ log ξi ≥t) = P(ξi ≤exp(−λt)) = exp(−λt).
+36
+
+Thus, the claim follows as
+P(Γ(ξ, µ) = y, −log(ξy)/µ(y) ≥t)
+= P(y = arg min
+i
+−log(ξi)/µ(i), −log(ξy)/µ(y) ≥t)
+(⋆)
+=
+Z
+u≥t
+µ(y) exp(−µ(y)u) · Πi∈supp(µ),i̸=yP(−log(ξi)/µ(i) > u)
+=
+Z
+u≥t
+µ(y) exp(−µ(y)u) · Πi∈supp(µ),i̸=y exp(−µ(i)u)
+= µ(y)
+Z
+u≥t
+Πi∈supp(µ) exp(−µ(i)u)
+= µ(y)
+Z
+u≥t
+exp(−u)
+= µ(y) exp(−t),
+where in (⋆) we use the fact that the density of −log(ξy)/µ(y) at u is µ(y) exp(−µ(y)u).
+C.1
+Proof of Theorem 2
+Proof. The result follows immediately from integrating the result of Lemma C.1 over t ≥
+0.
+C.2
+Proof of Lemma 2.7
+Proof. Lemma C.1 implies −log(ξi)/p(Yi | Y:i−1) | Y ∼Exp(1), and thus E[−log(ξi) | Y ] =
+p(Yi | Y:i−1). Meanwhile, as ξ′
+i ∼Unif([0, 1]) independently of Y , we have
+P(−log ξ′
+i ≥t | Y ) = P(ξ′
+i ≤exp(−t)) = exp(−t),
+implying −log(ξ′
+i) | Y ∼Exp(1) and so E[−log(ξ′
+i) | Y ] = 1. The result follows immediately,
+recalling α(Yi−1:i) = 1 −p(Yi | Yi−1) by definition.
+C.3
+Proof of Lemma 2.8
+We prove the following general result, from which Lemma 2.8 follows as a corollary.
+Lemma C.2. Let m, n ∈N with n ≥m, where m is the generation length and n is the water-
+mark key length. Define the decoder Γ by equation (4), alignment score d by equation (5), and
+ϕ by Algorithm 3 with block size k ≤m. Let ξ, ξ′ i.i.d.
+∼Unif(Ξn) with Y = generate(ξ; n, p, Γ).
+Let eY be a substring of Y of length at least k that is conditionally independent of ξ and ξ′
+given Y , i.e., eY = Yτ+1:τ+ℓfor ℓ≥k. Then for bα := 1 −1
+k
+Pτ+k
+i=τ+1 p(Yi | Y:i−1), almost surely
+P(ϕ(eY , ξ′) ≤ϕ(eY , ξ) | eY , Y ) ≤2n exp
+ −min{kbα2/8, kbα/4}
+
+.
+Proof. Recall by definition
+d(y, ξ) = −
+len(y)
+X
+i=1
+log ξi,yi.
+37
+
+Lemma 2.7 and the conditional independence of τ and ξ given Y imply for any j ∈[n] that
+E[d(eY , ξ′
+(j+1:j+k)%n) | eY , Y ] −E[d(eY , ξτ+1:τ+k) | eY , Y ] = kbα.
+From Lemma C.1, we have −log ξτ+i,eYi | eY , Y ∼Exp(γi) for some γi ≤1 for all i ∈[m].
+Also, from the independence of eY and ξ′, we have −log ξ′
+j,eYi | eY , Y ∼Exp(1) for all i ∈[m]
+and j ∈[n]. The following observation thus implies −log ξi,eYi | eY , Y and −log ξ′
+j,eYi | eY , Y are
+both (2, 2)-subexponential random variables.
+Observation C.1. Let X ∼Exp(1). Then X is a (2, 2) subexponential random variable.
+Proof of Observation C.1. For t < 1/2, we have
+E[et(X−E[X])] =
+Z ∞
+0
+et(x−1)e−x dx
+(a)
+=
+e−t
+1 −t
+(b)
+≤(1 −t + t2)(1 + t + 2t2)
+(c)
+≤(1 + 2t2)
+≤e2t2,
+where (a) follows from the fact that t < 1 (otherwise, the integral would not be finite); (b)
+follows from Taylor expanding e−t and 1/(1 −t) and applying the fact that t < 1/2 to bound
+the higher-order terms; and (c) again follows from t < 1/2. The claim follows immediately.
+Thus, using the fact that ξi is conditionally independent of ξ−i given Y , a standard
+Chernoff bound [26, Proposition 2.9] implies for each j ∈[n] that
+P
+
+d(eY , ξ′
+j+1:j+k) ≤d(eY , ξτ+1:τ+k) | eY , Y
+
+≤P
+
+d(eY , ξ1:m) −E[d(eY , ξ1:m)] ≥kbα/2 | eY , Y
+
++ P
+
+E[d(eY , ξ′
+j+1:j+m)] −d(eY , ξ′
+j+1:j+m) ≥kbα/2 | eY , Y
+
+≤2 exp
+ −min{kbα2/8, kbα/4}
+
+.
+Recalling the definition of the test statistic ϕ via Algorithm 3, the main claim then follows
+from taking a union bound over all j ∈[n].
+D
+Details of experiments
+D.1
+Experimental protocol
+In Experiments 1-6, for each watermark we first generate a sequence tokens, decode the
+tokens into text (i.e., a string) using the appropriate tokenizer for the language model, and
+then encode the text back into tokens before running detect. Each generation is coditioned
+on a prompt; we obtain the prompts by sampling documents from the news-like subset of the
+C4 dataset and truncating the last m tokens. We enforce a minimum prompt size of 50 tokens
+38
+
+in all experiments; we skip over any document that is not long enough. The retokenization is
+not always equal to the original tokens generated by the model;15 in order to ensure detect
+always receives at least m tokens, we pad its input with special pad tokens (specific to each
+model’s tokenizer). We also initially generate a number of buffer tokens beyond m, so in
+most cases the padding is unnecessary. We set the number of buffer tokens to be 20 in every
+experiment except for Experiment 5, where we set it to be 100 in order to ensure that even
+after deleting tokens there are typically still at least m tokens remaining. We always truncate
+the number of tokens given to detect to be at most m, irrespective of the number of buffer
+tokens.
+D.2
+Roundtrip translation
+In Experiment 6, we perform round-trip translations from English to French and from English
+to Russian using the OPUS-MT collection of translation models [20, 21]. Specifically, we use
+the versions of these models hosted on the HuggingfaceHub,16 associated with the identifiers:
+• Helsinki-NLP/opus-mt-tc-big-en-fr - English to French,
+• Helsinki-NLP/opus-mt-tc-big-fr-en - French to English,
+• Helsinki-NLP/opus-mt-en-ru - English to Russian,
+• Helsinki-NLP/opus-mt-ru-en - Russian to English.
+D.3
+Computing p-values
+As we mention previously, to save computation we modify detect to use a fixed reference
+distribution to compute p-values. For the sake of concreteness, we give the full pseudocode
+for the modified version of detect in Algorithm 5; in Experiments 1-6, we compute p-values
+using Algorithm 6 to construct the reference distribution using the news-like subset of the C4
+dataset as the text distribution.
+Algorithm 5: Watermarked text detection with fixed reference distribution
+Input
+: string y ∈V∗, seed sequence ξ ∈Ξn
+Params: test statistic ϕ; reference distribution {ϕt}T
+t=1
+Output: p-value bp ∈[0, 1]
+1 bp ←1
+T
+PT
+t=1 1{ϕ(y, ξ) < ϕt}
+2 return bp
+As a sanity check, we include histograms of the p-values we compute for nonwatermarked
+text for each method to verify that they are roughly uniformly distributed on the interval
+[0, 1] (setting m = 50 and sampling prompts from the news-like subset of the C4 dataset, as
+in Experiment 1). In the cases of KGW-1.0 and KGW-2.0, the distribution is not quite uniform
+due to the discrete nature of their test statistics.
+15Byte-pair tokenizations of text (used by both the OPT and LLaMA) are not unique, due to the fact that
+they augment a base vocabulary (e.g., characters) with extra tokens to represent common substrings.
+16https://huggingface.co/
+39
+
+Algorithm 6: Reference distribution construction
+Input
+: resample size T ∈N, text length m ∈N, watermark key sequence
+distribution ν ∈∆(Ξn)
+Params: test statistic ϕ; text distribution P; minimum prompt length m0
+Output: reference distribution {ϕt}T
+t=1 ∈RT
+1 t ←1
+2 while t ≤T do
+3
+Y ∼P
+4
+if len(Y ) ≤m0 + m then
+5
+continue
+6
+ξ(t) ∼ν
+7
+ϕt ←ϕ(Y−m:, ξ(t))
+8
+t ←t + 1
+9 return {ϕt}T
+t=1
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 15: Distribution of p-values for nonwatermarked text using ITS detector.
+40
+
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 16: Distribution of p-values for nonwatermarked text using ITS-edit detector.
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 17: Distribution of p-values for nonwatermarked text using EXP detector.
+41
+
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 18: Distribution of p-values for nonwatermarked text using EXP-edit detector.
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 19: Distribution of p-values for nonwatermarked text using KGW-1.0 detector.
+42
+
+(a) OPT-1.3B
+(b) LLaMA-7B
+Figure 20: Distribution of p-values for nonwatermarked text using KGW-2.0 detector.
+D.4
+Hyperparameter tuning
+There are two hyperparameters involved in computing each of our watermark test statistics
+(i.e., Algorithm 3), the block size k and the alignment score d. We do not tune the block size
+k for our experiments, instead simply letting k = m, i.e., the text length, and the alignment
+score is also fixed for each of our watermarks, except for the hyperparameter γ in both ITS-
+edit and EXP-edit. Smaller values of γ (at least to a certain point) tend to make these
+watermarks more robust to insertion and deletion errors, as Figure 21 illustrates, but also
+hurts their statistical power for large values of n, i.e., the watermark key length, as Figure 22
+illustrates. We set γ = 0.4 for ITS-edit and γ = 0.0 for EXP-edit to balance these two
+competing desiderata.
+(a) ITS-edit
+(b) EXP-edit
+Figure 21: Median p-value of watermarked text for varying γ, with OPT-1.3B models and
+m = 70 for ITS-edit and m = 35 for EXP-edit, after corrupting the text with random
+insertions (fraction of inserted tokens is 0.1 for ITS-edit and 0.6 for EXP-edit).
+43
+
+(a) ITS-edit
+(b) EXP-edit
+Figure 22: Median p-value of watermarked text, varying γ and n, with OPT-1.3B model and
+m = 40 for ITS-edit and m = 10 for EXP-edit.
+D.5
+Deferred results
+D.5.1
+Experiment 3
+(a) OPT-1.3B
+(b) LLaMA 7B
+Figure 23: Median p-value of watermarked text relative to the fraction of substitution errors,
+for OPT-1.3B and LLaMA 7B models with m = 35.
+44
+
+(a) OPT-1.3B
+(b) LLaMA 7B
+Figure 24: Median p-value of watermarked text relative to the fraction of substitution errors,
+for OPT-1.3B and LLaMA 7B models with m = 70.
+(a) OPT-1.3B
+(b) LLaMA 7B
+Figure 25: Median p-value of watermarked text relative to the fraction of substitution errors,
+for OPT-1.3B and LLaMA 7B models with m = 70.
+45
+
+D.5.2
+Experiment 4
+(a) OPT-1.3B
+(b) LLaMA 7B
+Figure 26: Median p-value of watermarked text relative to the fraction of insertion errors, for
+OPT-1.3B and LLaMA 7B models with m = 35.
+(a) OPT-1.3B
+(b) LLaMA 7B
+Figure 27: Median p-value of watermarked text relative to the fraction of insertion errors, for
+OPT-1.3B and LLaMA 7B models with m = 70.
+46
+
+(a) OPT-1.3B
+(b) LLaMA 7B
+Figure 28: Median p-value of watermarked text relative to the fraction of insertion errors, for
+OPT-1.3B and LLaMA 7B models with m = 70.
+D.5.3
+Experiment 5
+(a) OPT-1.3B
+(b) LLaMA 7B
+Figure 29: Median p-value of watermarked text relative to the fraction of deletion errors, for
+OPT-1.3B and LLaMA 7B models with m = 35.
+47
+
+(a) OPT-1.3B
+(b) LLaMA 7B
+Figure 30: Median p-value of watermarked text relative to the fraction of deletion errors, for
+OPT-1.3B and LLaMA 7B models with m = 70.
+(a) OPT-1.3B
+(b) LLaMA 7B
+Figure 31: Median p-value of watermarked text relative to the fraction of deletion errors, for
+OPT-1.3B and LLaMA 7B models with m = 70.
+48
+
+D.5.4
+Experiment 6
+(a) OPT-1.3B
+(b) LLaMA 7B
+Figure 32: Median p-value of watermarked text relative to the fraction of insertion errors,
+after roundtrip translation via French, for OPT-1.3B and LLaMA 7B models with m = 35.
+(a) OPT-1.3B
+(b) LLaMA 7B
+Figure 33: Median p-value of watermarked text relative to the text length, after roundtrip
+translation via Russian, for OPT-1.3B and LLaMA 7B models with m = 35.
+D.5.5
+Instruction following case study
+We give three examples of instructions for which hashing produces qualitatively worse re-
+sponses than regular samples from the language model:
+1. “Give me 20 ideas for the title of a paper on watermarking language models.”
+2. “Give me 20 ideas for startup names.”
+3. “Give me a list of 20 movies.”
+We format each of the instructions as described by Taori et al. [19] before calling the model.
+49
+
+We compare samples from our EXP watermark strategy,17 which are equivalent to regular
+samples from the language model, to samples from KGW-2.0 and the hashing-based version of
+EXP we describe in the main text (i.e., the watermark of Aaronson [1]), i.e., EXP-hash. For
+both EXP and KGW-2.0, we generate the samples using five different random seeds (the hash
+function in KGW-2.0 is fixed in the implementation of Kirchenbauer et al. [13]), whereas in the
+case of EXP-hash we use five different hash functions (namely, we let the previous k tokens
+{yi}k
+i=1 hash to j + Pk
+i=1 yi for j ∈{0, . . . , 4}). We label each sample using the seed/hash we
+used to generate it. We include samples from two versions of EXP-hash: one where we hash
+the previous tokens (k = 1) and another where we hash the previous four tokens (k = 4). For
+KGW-2.0, we only hash the previous token since the public implementation of Kirchenbauer
+et al. [13] does not include the option to hash more tokens.
+We find that EXP-hash with k = 1 often produces qualitatively worse responses that
+degenerate into repetition. With k = 4, the repetition is substantially less noticeable, though
+occasionally it still manifests. In contrast, even when we only hash the previous token, the
+repetition of KGW-2.0 is not nearly as noticeable as in EXP-hash. We speculate this is due
+to stochasticity of KGW-2.0 (i.e., KGW-2.0 biases the distribution over the next token to a
+subset of tokens but still ultimately samples from this distribution randomly). Of course, this
+stochasticity comes at a price: KGW-2.0 was generally less powerful compared to the EXP and
+EXP-edit strategies in our other experiments.
+We include sample sheets for all methods for the first instruction below. To avoid excessive
+clutter, we defer the sample sheets for the remaining two instructions to our code release.
+Method
+Seed
+Response
+EXP-hash
+(k = 1)
+0
+1. Watermarking Deep Learning Models: A Review 2. Understanding and Eval-
+uating Watermarking Techniques for Neural Networks 3. Towards Unobtrusive
+and Invisible Watermarking for Neural Networks 4. Customizable Watermark-
+ing for Neural Networks 5. Reverse Engineering Watermarked Neural Networks
+6. Understanding and Exploiting Watermarking Attacks on Neural Networks 7.
+Combatting Watermarking Attacks on Neural Networks 8. Customizable Wa-
+termarking for Neural Networks 9. Customizable Watermarking for Neural Net-
+works 10. Customizable Watermarking for Neural Networks 11. Customizable
+Watermarking for Neural Networks 12. Customizable Watermarking for Neural
+Networks 13. Customizable Watermarking for Neural Networks 14. Customiz-
+able Watermarking for Neural Networks 15. Customizable Watermarking for
+Neural Networks 16. Customizable Watermarking for Neural Networks 17. Cus-
+tomizable Watermarking for Neural Networks 18. Customizable Watermarking
+for Neural Networks 19. Customizable Watermarking for Neural Networks
+17Recall both EXP and EXP-edit use the same generate method.
+50
+
+EXP-hash
+(k = 1)
+1
+1. Exploiting Watermarks in Language Modeling 2. Watermarking Language
+Models: State of the Art 3. Keys to the Kingdom: Refining Watermarking
+Language Models 4. Exploiting Watermarks in Natural Language Processing 5.
+Keys to the Kingdom: Refining Watermarking Language Models 6. Keys to the
+Kingdom: Refining Watermarking Language Models 7. Keys to the Kingdom:
+Refining Watermarking Language Models 8. Keys to the Kingdom: Refining
+Watermarking Language Models 9.
+Keys to the Kingdom: Refining Water-
+marking Language Models 10. Keys to the Kingdom: Refining Watermarking
+Language Models 11. Keys to the Kingdom: Refining Watermarking Language
+Models 12. Keys to the Kingdom: Refining Watermarking Language Models
+13. Keys to the Kingdom: Refining Watermarking Language Models 14. Keys
+to the Kingdom: Refining Watermarking Language Models 15. Keys to the
+Kingdom: Refining Watermarking Language Models 16. Keys to the Kingdom:
+Refining Watermarking Language Models 17. Keys to the Kingdom: Refining
+Watermarking Language Models 18. Keys to the Kingdom: Refining Water-
+marking Language Models 19. Keys to the Kingdom: Refining Watermarking
+Language Models 20. Keys to the Kingdom: Refining Watermarking Language
+Models
+EXP-hash
+(k = 1)
+2
+1.
+”Making Watermarks: Creative Approaches to Watermarking Language
+Models” 2. ”Making Watermarks: Creative Approaches to Watermarking Lan-
+guage Models” 3. ”Making Watermarks: Creative Approaches to Watermark-
+ing Language Models” 4. ”Making Watermarks: Creative Approaches to Wa-
+termarking Language Models” 5. ”Making Watermarks: Creative Approaches
+to Watermarking Language Models” 6. ”Making Watermarks: Creative Ap-
+proaches to Watermarking Language Models” 7. ”Making Watermarks: Cre-
+ative Approaches to Watermarking Language Models” 8. ”Making Watermarks:
+Creative Approaches to Watermarking Language Models” 9. ”Making Water-
+marks: Creative Approaches to Watermarking Language Models” 10. ”Mak-
+ing Watermarks: Creative Approaches to Watermarking Language Models” 11.
+”Making Watermarks: Creative Approaches to Watermarking Language Mod-
+els” 12.
+”Making Watermarks: Creative Approaches to Watermarking Lan-
+guage Models” 13. ”Making Watermarks: Creative Approaches to Watermark-
+ing Language Models” 14. ”Making Watermarks: Creative Approaches to Wa-
+termarking Language Models” 15. ”Making Watermarks: Creative Approaches
+to Watermarking Language Models” 16. ”Making Watermarks: Creative Ap-
+proaches to Watermarking Language Models” 17. ”Making Watermarks: Cre-
+ative Approaches to Watermarking Language Models” 18.
+”Making Water-
+marks: Creative Approaches to Watermarking Language Models” 19. ”Mak-
+ing Watermarks: Creative Approaches to Watermarking Language Models” 20.
+”Making Watermarks: Creative Approaches to Watermarking Language Mod-
+els”
+51
+
+EXP-hash
+(k = 1)
+3
+1.
+Watermarking Language Models: A Review 2.
+Watermarking Language
+Models for Copyright Protection 3. Watermarking Language Models for Foren-
+sic Analysis 4. Watermarking Language Models for Audio Signals 5. Water-
+marking Language Models for Video Signals 6. Watermarking Language Models
+for Documents 7. Watermarking Language Models for Software 8. Watermark-
+ing Language Models for Big Data 9.
+Watermarking Language Models for
+Natural Language Processing 10. Watermarking Language Models for Machine
+Learning 11. Watermarking Language Models for Deep Learning 12. Water-
+marking Language Models for Speech Recognition 13. Watermarking Language
+Models for Audio Synthesis 14. Watermarking Language Models for Computer
+Vision 15. Watermarking Language Models for Robotics 16. Watermarking
+Language Models for Autonomous Driving 17. Watermarking Language Models
+for Medical Image Processing 18. Watermarking Language Models for Medical
+Diagnostics 19. Watermarking Language Models for Text Translation
+EXP-hash
+(k = 1)
+4
+1. Image based watermarking for language models 2. Steganographic water-
+marking for language models 3. Timestamps for language models 4. Water-
+marking for language model improvisation 5. Secure watermarking for language
+model sharing 6. Image based watermarking for language model improvisation
+7.
+Timestamps for language model improvisation 8.
+Watermarking for lan-
+guage model evolution 9. Secure watermarking for language model evolution
+10. Image based watermarking for language model evolution 11. Timestamps
+for language model evolution 12. Watermarking for language model generation
+13. Image based watermarking for language model generation 14. Timestamps
+for language model generation 15. Watermarking for language model under-
+standing 16. Image based watermarking for language model understanding 17.
+Timestamps for language model understanding 18. Watermarking for language
+model improvisation and understanding 19. Image based watermarking for lan-
+guage model improvisation and understanding
+Table 1: Responses from EXP-hash with k = 1 to the prompt: “Give me 20 ideas for the title
+of a paper on watermarking language models.”
+Method
+Seed
+Response
+52
+
+EXP-hash
+(k = 4)
+0
+1. ”Safeguarding Language Models: Exploring Watermarking for Vertext and
+Image Models” 2.
+”Watermarking Language Models: Protecting Your Cre-
+ations” 3. ”The Future of Watermarking Language Models: Ethical and Prac-
+tical Considerations” 4. ”Securing Language Models: Exploring Emerging Tech-
+nologies” 5. ”Watermarking Language Models: Balancing Creativity and Se-
+curity” 6. ”Watermarking Language Models: Balancing Security and Acces-
+sibility” 7. ”Watermarking Language Models: Defending your Creativity” 8.
+”Watermarking Language Models: Defending your Creativity with Emerging
+Technologies” 9. ”Protecting Language Models: Exploring Emerging Technolo-
+gies” 10. ”Securing Language Models: Balancing Security and Accessibility”
+11.
+”The Future of Watermarking Language Models: Ethical and Practical
+Considerations” 12. ”Watermarking Language Models: Balancing Security and
+Accessibility” 13. ”Watermarking Language Models: Balancing Security and
+Accessibility with Emerging Technologies” 14. ”Watermarking Language Mod-
+els: Defending your Creativity with Emerging Technologies” 15. ”Watermark-
+ing Language Models: Defending your Creativity with Emerging Technologies”
+16.
+”Securing Language Models: Balancing Security and Accessibility with
+Emerging Technologies” 17. ”Exploring Watermarking for Vertext and Image
+Models” 18.
+”Watermarking Language Models: Balancing Security and Ac-
+cessibility with Emerging Technologies” 19. ”Defending your Creativity with
+Emerging Technologies”
+EXP-hash
+(k = 4)
+1
+1. Towards a New Era of Transparent Language Models 2. A Review of the
+State of Watermarking Language Models 3. The Benefits of Embedding Wa-
+termarks in Language Models 4. Protecting Language Models with Multiscale
+Watermarks 5. Impact of Watermarking on the Performance of Language Mod-
+els 6. A Survey on Watermarking for Language Models 7. Practical Perspectives
+on Watermarking for Language Models 8. A Comprehensive Study on Design-
+ing Watermarks for Language Models 9. Overview of Techniques for Adding
+Watermarks to Language Models 10. Exploring the Possibilities of Watermark-
+ing for Language Models 11. How to Incorporate Watermarks in Your Language
+Model 12. The Science behind Watermarking for Language Models 13. AI for
+Insertion of Watermarks in Language Models 14. The Role of Machine Learning
+in Watermarking for Language Models 15. Future Trends in Watermarking for
+Language Models 16. A Review on Watermarking for Language Models 17. Ap-
+plications of Watermarking in Language Modeling 18. A Comprehensive Study
+on Designing Robust Watermarks for Language Models 19. A Novel Approach
+to Incorporate Watermarks in Your Language Model.
+53
+
+EXP-hash
+(k = 4)
+2
+1. Securing Your Language Model 2. Stamping Out Unauthorized Use 3. Col-
+oring Outside the Lines: Creative Watermarks 4. Avoiding Watermarks: Best
+Practices 5. Authentication Made Easy with Watermarks 6. Defending Your
+Language Model 7. Unique Identifiers: Adding Value to your Model 8. Con-
+nected Learning: Leveraging Watermarks 9. The Problem with Open Access 10.
+How to Effectively Mark a Language Model 11. Making a Splash with Creative
+Watermarks 12.
+Understanding the Benefits of Watermarking 13.
+Utilizing
+Watermarks for Better Attribution 14. Stewarding Your Language Model 15.
+The Role of Technology in Watermarking 16. Beyond the Horizon: Adaptive
+Watermarking 17. The Art of Discretion in Watermarking 18. Harnessing the
+Power of Invisible Watermarks 19. Practical Considerations for Watermarking
+EXP-hash
+(k = 4)
+3
+1. Elucidating Watermarking Strategies for Language Models 2. Innovative
+Techniques for Watermarking Language Models 3. Intelligent and Innovative
+Watermarking Strategies for Language Models 4. Overview of Watermarking
+Strategies for Language Models 5. Emerging Technologies in Watermarking for
+Language Models 6. Practical Perspectives on Watermarking Language Models
+7. Reducing Watermarking Strategies for Language Models 8. Robust Tech-
+niques for Watermarking Language Models 9. Security Factors in Watermarking
+Language Models 10.
+Understanding Watermarking Strategies for Language
+Models 11. Evaluation of Watermarking Strategies for Language Models 12.
+Exploring Watermarking Strategies for Language Models 13.
+Innovations in
+Watermarking Language Models 14. Intelligent Techniques for Watermarking
+Language Models 15. Methods for Watermarking Language Models 16. Over-
+lapping Security Factors in Watermarking Language Models 17. Understanding
+Watermarking Strategies for Language Models 18. Emerging Technologies in
+Watermarking Language Models 19.
+Exploring Watermarking Strategies for
+Language Models 20. Intelligent and Innovative Watermarking Strategies for
+Language Models
+EXP-hash
+(k = 4)
+4
+1. Securing Language Models 2. Extra Secure Language Models 3. Defending
+Language Models 4. Protecting Language Models 5. Cryptographic Language
+Models 6. Unique Language Models 7. Robust Language Models 8. Marking
+Language Models 9. Preventing Language Models 10. Hiding Language Models
+11. Invisible Language Models 12. Steganographic Language Models 13. Wa-
+termarking Language Models 14. Preserving Language Models 15. Uniquely
+Identifiable Language Models 16. Characterizing Language Models 17. Distin-
+guishable Language Models 18. Language Model Defence 19. Ultra Defence
+Language Models
+Table 2: Responses from EXP-hash with k = 4 to the prompt: “Give me 20 ideas for the title
+of a paper on watermarking language models.”
+Method
+Seed
+Response
+54
+
+KGW-2.0
+0
+1. Steganography in Language Models: A Review 2. Combating Model Piracy
+with Watermarking 3. Techniques for Traceability and Watermarking 4. Salient
+Features for Traceability and Watermarking 5.
+Reflections on Model Secu-
+rity and Watermarking 6. Insights on Model Security and Watermarking 7.
+Protecting Models with Watermarking 8. Techniques for Esoteric Traceabil-
+ity and Watermarking 9. Ins and Outs of Steganography in Language Models
+10. Technologies for Efficient Watermarking 11. Vision Beyond Model Piracy:
+Watermarking Perspectives 12.
+Impact of Model Security on Watermarking
+13.
+Emerging Trends in Watermarking of Language Models 14.
+Future of
+Watermarking Techniques for Language Models 15. Drivers for Success in Wa-
+termarking Language Models 16. Robustness of Models against Watermarking
+17. Taking Security beyond Watermarking 18. Leveraging Model History and
+Watermarking 19.
+Techniques for Secure Watermarking 20.
+Comprehensive
+Overview of Model Security and Watermarking.
+KGW-2.0
+1
+1. Embedding Digital Signatures: Towards Traceable and Transparent Lan-
+guage Models 2. Stamping Out Deception: Recording Attribution in Language
+Models 3. Defining Your Digital Dashboard: Watermarking for Traceability
+4.
+Scaling Trust in Language Models:
+Watermarking for Traceability and
+Transparency 5.
+Taking an East Asian Approach to Transparency in Lan-
+guage Models 6.
+Riding the Big Five: Towards Transparency in Language
+Models 7. Measuring the ”Ps” of Language Models: Perceptual and Practical
+Transparency 8. Marking a Mark: Comprehensive Examination of Attribution
+in Language Models 9.
+Visualizing Deception: Comprehensive Examination
+of Deceptive Language Models 10. Peak Performance: Evaluating Language
+Models for Transparency 11. Closing the Loop: Examining the Long-term Im-
+pacts of Language Models 12. Diversifying Perspective: Impacts of Modelling
+Language 13. Disclosing the Hidden Layers: Understanding Transparency in
+Language Models 14. Auditable: Making Language Models Accountable 15.
+Labelling Human Language: Exploring the Capabilities of Language Models
+16. Setting the Record: Estimating the Real-world Impacts of Language Mod-
+els 17. Language Models: Towards Traceable, Transparent and Accountable
+Systems 18. Think Outside the Box: Exploring Future Trends in Language
+Models 19. Embedding Trust: Towards Traceable and Transparent Language
+Models.
+KGW-2.0
+2
+1. Defending Latent Space with Secure Watermarks 2. Emergent Waveforms:
+A Watermarking Approach 3. Embedding Digital Identities in Neural Networks
+4. Marking up Models: A Survey on Watermarking 5. Leveraging Linked Data
+for Watermarking 6.
+Stamping Out Superfluous Models 7.
+Inspecting and
+Marking Models 8. Rethinking Digital Identity with Watermarks 9. Marking
+Up Models: A Usage-Driven Approach 10. Bridge the Distance with Digital
+Watermarks 11. Introducing Transparency in Model Formation 12. Unlocking
+Models with Secure Watermarks 13.
+Giving Visible Identity to Models 14.
+Unveiling Dark Knowledge with Watermarks 15. Linking Models: A Visual
+Approach 16. Visualizing Dark Knowledge through Watermarks 17. Leveraging
+Physical World for Model Tracking 18. Augmented Reality for Model Tracking
+19. Securing Deep Models with Watermarks
+55
+
+KGW-2.0
+3
+1.
+Providing Type-Safe Watermarks 2.
+Constructing Robust Watermarks
+for Multimedia Applications 3. Adding Security Features to Text Vectors 4.
+Stretching Visible Watermarks 5. Embedding Watermarks in Natural Language
+Models 6. Training Recurrent Neural Networks with Watermarks 7. Detection
+of Unsupervised Watermarks in Text Sequences 8.
+Interactive Visualization
+of Watermarks 9.
+Observe Hidden Watermarks with Machine Learning 10.
+Extracting Information from Unseen Watermarks 11. Building Robust Water-
+marks for the Blockchain 12. Adding Dynamic Watermarks to Video Streams
+13. Storing Watermarks in Individual Dataset Elements 14. Extracting Per-
+tinent Information from Unwanted Watermarks 15. Decoding Hidden Digital
+Watermarks 16. Introducing Watermarks to Secure Semi-honest Adversaries 17.
+Genuine Components with Integrated Watermarks 18. Intelligent Techniques
+for Steganography 19. Protecting Quality with Data-Driven Watermarks
+KGW-2.0
+4
+1. Embedding Watermarks in Language Models 2. Secure Language Models
+using Watermarks 3. Steganographic watermarking of natural language models
+4. Exploring Watermarking Techniques for Natural Language Models 5. Ana-
+lyzing Natural Language Models using Watermarking Techniques 6. Detecting
+Watermarks in Natural Language Models 7.
+Supervised Learning of Water-
+marks for Natural Language Models 8. Unsupervised Learning of Watermarks
+for Natural Language Models 9. Multiple watermarks for secure language mod-
+els 10. Generative watermarking techniques for natural language models 11.
+Evaluation of watermarks for secure natural language models 12. Efficacy of
+watermarks in preventing model poisoning 13. Robustness of watermarks for
+natural language models 14. Comparison of watermarking techniques for nat-
+ural language models 15. Linking of natural language models with watermarks
+16. Extraction of hidden information from natural language models 17. Univer-
+sality of watermarks for different languages 18. Learning watermarked natural
+language models 19. Reduced Dimensionality Modeling using Watermarks
+Table 3: Responses from KGW-2.0 to the prompt: “Give me 20 ideas for the title of a paper
+on watermarking language models.”
+Method
+Seed
+Response
+56
+
+EXP
+0
+Here is the list of 20 ideas for the title of a paper on watermarking language
+models:
+1.
+”Understanding Watermarking Techniques for Language Models” 2.
+”A
+Comprehensive Study on Watermarking for Language Models” 3. ”Watermark-
+ing Techniques for Optimizing Language Models” 4. ”A Survey of Watermark-
+ing Techniques for Language Models” 5. ”Exploring the Potential of Water-
+marking for Language Models” 6. ”Implementing Watermarking for Language
+Model Optimization” 7.
+”Watermarking Strategies for Enhancing Language
+Models” 8. ”Investigating the Possibilities of Watermarking for Language Mod-
+els” 9. ”Advanced Watermarking Approaches for Language Models” 10. ”Ex-
+ploring the Use of Watermarking for Language Model Validation” 11. ”Un-
+derstanding the Benefits of Watermarking for Language Model Ensemble” 12.
+”Leveraging Watermarking Techniques for Enhanced Language Model Perfor-
+mance” 13. ”Enhancing Language Models with Watermarking” 14. ”Evaluating
+the Impact of Watermarking Techniques on Language Models” 15. ”Analyzing
+the Feasibility of Watermarking for Language Model Comparison” 16. ”Ex-
+ploring the Possibilities of Watermarking for Optimizing Language Models” 17.
+”Exploiting Watermarking to Enhance Language Model Accuracy” 18. ”Ad-
+vantages of Using Watermarking for Validating Language Models” 19. ”The
+Promise of Watermarking for Evaluating Language Model Performance”
+EXP
+1
+Title ideas for a paper on watermarking language models: 1. Hidden Messages:
+Protecting Language Models with Watermarking 2. Securing Language Models
+with Watermarking 3. Defending Language Models against Tampering 4. Wa-
+termarking Language Models for Better Protection 5. Verifying the Integrity of
+Language Models 6. Utilizing Watermarking to Boost Language Model Secu-
+rity 7. Ensuring the Authenticity of Language Models 8. Safekeeping Language
+Models with Watermarking 9. Defending Against Model Tampering with Wa-
+termarking 10.
+A Review of Model Security Techniques: Watermarking 11.
+Utilizing Watermarks to Protect Language Models 12. Protective Techniques
+for Language Models: Watermarking 13. Implementing Watermarks to Boost
+Language Model Security 14. Preventing Model Tampering with Watermarking
+15. Methods for Verifying Language Model Integrity 16. Analyzing the Security
+of Language Models 17. Techniques for Securing Language Models 18. Inves-
+tigating Model Security with Watermarking 19. Extending Language Model
+Security with Watermarking
+57
+
+EXP
+2
+1. ”Deep Watermarks: Towards Pervasive Protection for Language Models”
+2. ”Adding Transparency to Language Models: A Watermarking Approach”
+3. ”Watermarking Language Models for Traceability and Verification” 4. ”A
+Comprehensive Review on Watermarking Methods for Language Models” 5.
+”The Power of Watermarking for Language Model Protection” 6. ”Attribut-
+ing Authorship in Language Models with Watermarking” 7. ”Understanding
+the Promise of Watermarking for Language Model Security” 8. ”Watermarking
+Language Models: A Survey” 9. ”Watermarking Language Models for Better
+Security” 10.
+”Mitigating Plagiarism in Language Models with Watermark-
+ing” 11. ”Watermarking Language Models: Exploring the Possibilities” 12. ”A
+Generative Approach to Watermarking Language Models” 13. ”Watermark-
+ing Strategies for Protecting Language Models” 14. ”Watermark Detection for
+Language Model Security” 15. ”Making Language Model Security Watertight
+with Watermarking” 16. ”Leveraging Watermarking for Enhancing Language
+Model Security” 17. ”Understanding the Role of Watermarking in Language
+Model Security” 18. ”A Novel Approach to Watermarking Language Models”
+19. ”Exploring the Possibilities of Watermarking for Language Model Security”
+EXP
+3
+1. A Comprehensive Review of Watermarking Techniques for Language Mod-
+els 2.
+A Survey of Watermarking Approaches for Language Modeling 3.
+A
+Normative Analysis of Watermarking for Language Modeling 4. Investigating
+Watermarking Techniques for Language Modeling 5. An Overview of Water-
+marking Methods for Language Modeling 6. Exploring Watermarking Solutions
+for Language Modeling 7. A Taxonomy of Watermarking Methods for Language
+Modeling 8. A Comparative Study of Watermarking Approaches for Language
+Modeling 9. Evaluating Watermarking Methods for Language Modeling 10. A
+Theoretical Analysis of Watermarking for Language Modeling 11. Investigating
+Watermarking Techniques for Natural Language Modeling 12. An Analytical
+Study of Watermarking for Language Modeling 13. Exploring Watermarking
+Methods for Natural Language Modeling 14. A Review of Watermarking Tech-
+niques for Natural Language Modeling 15. A Comparative Study of Watermark-
+ing Approaches for Natural Language Modeling 16. Investigating Watermarking
+Solutions for Natural Language Modeling 17. A Survey of Watermarking Tech-
+niques for Natural Language Modeling 18. Evaluating Watermarking Methods
+for Natural Language Modeling 19. A Review of Watermarking for Natural Lan-
+guage Modeling 20. Exploring Watermarking Solutions for Natural Language
+Modeling
+58
+
+EXP
+4
+1.
+Towards a Unified Watermarking Mechanism for Natural Language Pro-
+cessing Models 2. A Review of Methods for Watermarking Natural Language
+Models 3. Extracting Invariant Features for Watermarking Language Models
+4. The Use of Steganography for Watermarking Natural Language Models 5.
+Introducting Secure Watermarking Techniques for Natural Language Models 6.
+A Comprehensive Study on Watermarking Techniques for Natural Language
+Models 7. Toward Remarkably Visible Watermarks for Natural Language Mod-
+els 8.
+Analyzing the Impact of Watermarking on Natural Language Models
+9. A Practical Guide to Marking Language Models 10. Enhancing the Accu-
+racy of Watermarking Natural Language Models 11. Evaluating Strategies for
+Watermarking Natural Language Models 12. A Comparison of Watermarking
+Approaches for Natural Language Models 13. Promising Solutions for Securely
+Watermarking Natural Language Models 14.
+Generative and Discriminative
+Approaches for Watermarking Natural Language Models 15.
+Exploring the
+Possibilities of Steganography for Natural Language Models 16. Understanding
+the Challenges of Watermarking Natural Language Models 17. Evaluating the
+Effectiveness of Watermarking Techniques for Natural Language Models 18. En-
+hancing the Transparency of Watermarking Techniques for Natural Language
+Models 19. Extending the Capabilities of Watermarking Techniques for Natural
+Language Models 20. Assessing the Sophistication of Watermarking Techniques
+for Natural Language Models
+Table 4: Responses from EXP to the prompt: “Give me 20 ideas for the title of a paper on
+watermarking language models.”
+59

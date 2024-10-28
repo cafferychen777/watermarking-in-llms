@@ -1,0 +1,2342 @@
+Who Wrote this Code? Watermarking for Code Generation
+Taehyun Lee⋆,1
+Seokhee Hong⋆,1,3
+Jaewoo Ahn1
+Ilgee Hong1,4,♯
+Hwaran Lee2
+Sangdoo Yun1,2
+Jamin Shin†,2,♮
+Gunhee Kim†,1
+1Seoul National University
+2NAVER AI Lab
+3LG AI Research
+4Georgia Institute of Technology
+{taehyun.lee, seokhee.hong, jaewoo.ahn}@vision.snu.ac.kr
+ihong39@gatech.edu, {hwaran.lee, sangdoo.yun}@navercorp.com
+jamin.shin@outlook.com, gunhee@snu.ac.kr
+Abstract
+Since the remarkable generation performance
+of large language models raised ethical and
+legal concerns, approaches to detect machine-
+generated text by embedding watermarks are
+being developed. However, we discover that
+the existing works fail to function appropri-
+ately in code generation tasks due to the task’s
+nature of having low entropy.
+Extending a
+logit-modifying watermark method, we pro-
+pose Selective WatErmarking via Entropy
+Thresholding (SWEET), which enhances de-
+tection ability and mitigates code quality degen-
+eration by removing low-entropy segments at
+generating and detecting watermarks. Our ex-
+periments show that SWEET significantly im-
+proves code quality preservation while outper-
+forming all baselines, including post-hoc detec-
+tion methods, in detecting machine-generated
+code text. Our code is available in https://
+github.com/hongcheki/sweet-watermark.
+1
+Introduction
+In understanding and generating software pro-
+grams, large language models have rapidly ad-
+vanced towards expert-like proficiency (Chen et al.,
+2021; Luo et al., 2023; Li et al., 2023b; Nijkamp
+et al., 2023; Zheng et al., 2023; Gunasekar et al.,
+2023; Touvron et al., 2023; OpenAI, 2023a). This
+breakthrough in the automation of the coding pro-
+cess improves the productivity and efficiency of
+software engineer and lowers the barriers to creat-
+ing programs for non-experts (Vaithilingam et al.,
+2022).
+However, this advance comes with significant le-
+gal, ethical, and security concerns, including code
+licensing issues, code plagiarism, code vulnerabil-
+ity, and malware generation (He and Vechev, 2023;
+⋆Authors equally contributed.
+♯Work done during Ilgee’s internship at SNU VL Lab.
+♮Jamin Shin is currently affiliated with Trillion Labs, but
+the work was done while he was at NAVER.
+† Corresponding authors.
+Question
+def check_list_value(t):
+"""Return true if all numbers in the list
+l are below threshold t.
+"""
+(a) Solution
+for elem in l:
+if elem >= t:
+return False
+return True
+(b) WLLM, Strong watermark
+for k in range(l):
+if t <= k:
+break
+return True
+(c) WLLM, Weak watermark
+for elem in l:
+if elem >= t:
+return False
+return True
+(d) SWEET(ours) Selective watermarking
+for k in l:
+if t <= k:
+return False
+return True
+Detection: 
+/ Correctness:
+✅
+❌
+Detection: 
+/ Correctness: ✅
+❌
+Detection: 
+/ Correctness:
+✅
+✅
+Figure 1: Illustrated comparison of WLLM (Kirchen-
+bauer et al., 2023a) and SWEET (ours). Note that this
+example is a short hypothetical explanatory example.
+LLMs can generate working source code (a) without a
+watermark. Strong watermark (b) or weak watermark
+(c) may result in detection or correctness failure, but (d)
+selective watermarking may avoid both failures.
+Sandoval et al., 2023; Pearce et al., 2022; Carlini
+et al., 2021; Mirsky et al., 2023; Hazell, 2023). For
+example, there is an ongoing class-action copy-
+right lawsuit between a group of individuals and
+Microsoft, GitHub, and OpenAI, arising from al-
+legations of unlawful utilization and reproduction
+of the source code12. Furthermore, shortly after
+the launch of ChatGPT, numerous malicious actors
+on the Dark Web were observed sharing machine-
+generated malware and spear phishing tutorials3.
+Therefore, the development of reliable tools for
+1Code plagiarism
+2Code licensing issue
+3Malware generation
+arXiv:2305.15060v4  [cs.CL]  3 Jul 2024
+
+detecting machine-generated code is a very timely
+matter and is of utmost importance for fairly de-
+ploying LLMs with coding capabilities.
+Despite the need for immediate treatment of the
+machine-generated code detection problem, few
+efforts have been made to address it. Instead, many
+works still prioritize a detection problem on normal
+text (Solaiman et al., 2019; Ippolito et al., 2020;
+Guo et al., 2023; Tian and Cui, 2023; OpenAI,
+2023b; Yu et al., 2023; Gehrmann et al., 2019;
+Mitchell et al., 2023; Yang et al., 2023). While
+these post-hoc detection methods (i.e., no control
+during the text generation) have demonstrated pow-
+erful performance in the many domain of natural
+language tasks, their application to programming
+language remains unexplored.
+Contrary to the post-hoc detection methods,
+another line of research for detecting machine-
+generated text has gained attention: Watermarking-
+based methods, which embed a hidden signal
+within the generated text (Kirchenbauer et al.,
+2023a,b; Kuditipudi et al., 2023; Wang et al., 2023).
+For example, a method proposed in Kirchenbauer
+et al. (2023a) – which we refer to as WLLM (Wa-
+termarking for Large Language Models) – ran-
+domly divides the entire vocabulary into two
+groups (i.e., the green list and the red list) at
+each generation step and enhance the probability
+of green list tokens to be sampled. By adding
+scalar values to the logits of a green list tokens,
+the model favors generating tokens from the green
+list rather than the red one. To detect the water-
+mark in a text, we count the number of green
+tokens and check whether this number is statis-
+tically significant (through hypothesis testing) to
+conclude whether the model output is generated
+without knowledge of the green-red rule.
+While both watermarking-based methods and
+post-hoc detection methods work well in many lan-
+guage generation tasks, we observe that these per-
+formances do not transfer well to code generation
+tasks, for example, in Figure 1. In other words, it
+is much more challenging to embed watermarks
+in a detectable way without impairing the code
+functionality. We attribute this to the nature of
+extremely low entropy4 of code generation. If wa-
+termarking is applied strongly, it can severely de-
+grade the quality of the model output, which is
+particularly critical in code generation, as a single
+4We calculate entropy over the probability of the next token
+prediction. Please refer to Eq. 5 for details.
+violation of a rule can break the entire code (see
+“strong watermark” in Figure 1). On the other hand,
+if watermarking is applied too weakly, the low en-
+tropy hinders properly embedding watermarks and
+results in insufficient green tokens appearing, lead-
+ing to increased difficulty in detection (see “weak
+watermark” in Figure 1). These failures are not
+significant in plain text generation because the rela-
+tively higher entropy allows for more flexibility in
+candidate selections for watermarking.
+To address these failure modes, we extend the
+WLLM and propose Selective WatErmarking via
+Entropy Thresholding (SWEET) for Code LLMs
+(and LLMs). Instead of applying the green-red
+rule to every single token during generation, we
+only apply the rule to tokens with high enough en-
+tropy given a threshold. That is, we do not apply
+the green-red rule to the important tokens for mak-
+ing functional code, while making sure there are
+enough green list tokens to make a detectable wa-
+termark for less important tokens, hence, directly
+addressing each of the above failure modes. In
+code generation tasks, our method outperforms all
+baselines, including post-hoc detection methods, in
+detecting machine-generated code while achieving
+less code quality degradation than WLLM. Fur-
+thermore, through various analyses, we demon-
+strate that our method operates well even without
+prompts or with a small surrogate model, indicating
+its robust performance under practical settings.
+Our contributions are as follows:
+• We are the first to empirically explore the
+breakdown of existing watermarking and post-
+hoc detection methods in the code domain.
+• We propose a simple yet effective method
+called SWEET, which improves WLLM
+(Kirchenbauer et al., 2023a) and achieves
+significantly higher performance in machine-
+generated code detection while preserving
+code quality more than WLLM.
+• We have demonstrated the practical applica-
+bility and predominance of our method even
+in real-world settings, i.e., 1) without prompts,
+2) utilizing a smaller model as a detector, or
+3) under paraphrasing attacks.
+2
+Related Work
+Software Watermarking Software watermarking
+is the research field where a secret signal is em-
+bedded in the code without affecting its perfor-
+
+mance, to prevent software piracy. Static water-
+marking (Hamilton and Danicic, 2011; Li and Liu,
+2010; Myles et al., 2005) imprints watermarks typ-
+ically through code replacement and reordering.
+On the other hands, dynamic watermarking (Wang
+et al., 2018; Ma et al., 2019) injects watermarks
+during the compiling or executing stage of a pro-
+gram. For a detailed survey, please refer to Dey
+et al. (2018).
+Watermarking code text generated from a LLM
+is closer to static watermarking. For example, Li
+et al. (2023c) proposes a method employing the
+replacement of synonymous code. However, since
+this method heavily relies on language-specific
+rules, a malicious user knowing these rules could
+reverse the watermarking.
+LLM Text Watermarking The majority of wa-
+termarking methods for texts from LLMs are based
+on the modification of the original text via a prede-
+fined set of rules (Atallah et al., 2001, 2002; Kim
+et al., 2003; Topkara et al., 2006; Jalil and Mirza,
+2009; Meral et al., 2009; He et al., 2022a,b) or an-
+other language model, such as transformer-based
+networks. (Abdelnabi and Fritz, 2021; Yang et al.,
+2022; Yoo et al., 2023).
+Recently, a line of work embeds watermarks into
+tokens during the sampling process of LLMs (Liu
+et al., 2024). They embed watermarks within LLM-
+generated texts by either motifying logits from
+the LLM (Kirchenbauer et al., 2023a,b; Liu et al.,
+2023a; Takezawa et al., 2023; Hu et al., 2023) or
+manipulating the sampling procedure (Christ et al.,
+2023; Kuditipudi et al., 2023). Moreover, some re-
+cent works focus on the robustness of watermarks
+against attacks to remove watermarks (Zhao et al.,
+2023; Liu et al., 2023b; Ren et al., 2023). Lastly,
+Gu et al. (2023) investigates the learnability of wa-
+termarks in the distillation process from teacher to
+student model.
+However, these watermark methods exhibit vul-
+nerability in their watermark detection performance
+under low entropy situations (Kirchenbauer et al.,
+2023a; Kuditipudi et al., 2023), and a limited num-
+ber of studies, such as CTWL (Wang et al., 2023),
+try to handle it. We directly address the degradation
+of watermark detection performance in low entropy
+situations and demonstrate our method’s efficacy
+in low entropy tasks, such as code generation.
+Post-hoc Detection Post-hoc detection methods
+aim to differentiate between human-authored and
+machine-generated text without embedding any
+signal during generation. One line of work lever-
+ages perplexity-based features like GPTZero (Tian
+and Cui, 2023), Sniffer (Li et al., 2023a), and
+LLMDet (Wu et al., 2023). Another line of work
+uses pre-trained LM, such as RoBERTa (Liu et al.,
+2019), and fine-tunes it as a classifier to identify
+the source of text (Solaiman et al., 2019; Ippolito
+et al., 2020; OpenAI, 2023b; Guo et al., 2023;
+Yu et al., 2023; Mitrovi´c et al., 2023).
+Mean-
+while, some recent works tackle the detection
+problem without additional training procedures,
+such as GLTR (Gehrmann et al., 2019), Detect-
+GPT (Mitchell et al., 2023), and DNA-GPT (Yang
+et al., 2023). However, post-hoc detection meth-
+ods remain challenging. For example, while the
+GPTZero (Tian and Cui, 2023) is still in service,
+OpenAI’s AI text classifier (OpenAI, 2023b) was
+discontinued after six months due to low accu-
+racy rates. Furthermore, we have demonstrated
+that post-hoc detection methods failed to detect
+machine-generated code, with low entropy.
+3
+Method
+We propose a new watermarking method, SWEET,
+that selectively watermarks tokens only with high
+enough entropy.
+3.1
+Motivation
+Although the previous watermarking method
+WLLM (Kirchenbauer et al., 2023a) can be applied
+to any domain of LLM-generated text5, it incurs
+two critical problems during embedding and detect-
+ing watermarks in code generation, attributed to a
+dilemma regarding watermark strength.
+Watermarking causes performance degrada-
+tion. There are only a few different ways of ex-
+pressing the same meaning in a programming lan-
+guage, and just one wrong token can be attributed
+to undesirable outputs. If watermarks are embed-
+ded strongly, as WLLM randomly divides the vo-
+cabulary into green and red lists without leveraging
+any information about the context, promoting the
+logits of only green list tokens must heighten the
+chance of generating the wrong token. For ex-
+ample, in Figure 2 (a), after “return” token in the
+second row, the next token with the highest logit
+is “sum”, which is also part of the canonical solu-
+tion. However, WLLM puts “sum” into the red list
+while putting “mean” into the green list. Hence, the
+sampled token was “mean”, resulting in a syntax
+error.
+5Please refer to Appendix A for the details of WLLM.
+
+(a) WLLM
+Question (HumanEval[4])
+(b) SWEET – Entropy Threshold (Low)
+Canonical solution
+(d) SWEET – Entropy Threshold (High)
+(c) SWEET – Entropy Threshold (Moderate)
+Correctness:          / z-score: 2.45 / watermarking ratio: 1.0
+❌
+Correctness:          / z-score: 3.39 / watermarking ratio: 0.44
+❌
+Correctness:          / z-score: 4.67 / watermarking ratio: 0.19
+✅
+Correctness:          / z-score: 4.96 / watermarking ratio: 0.20
+✅
+Figure 2: A real example of HumanEval/4 for comparing between (a) WLLM and (b)–(d) our SWEET with different
+thresholds. Text colors annotate whether tokens are in the green or red list. Gray tokens have entropy smaller
+than the threshold and are not watermarked. The intensity of the yellow background color visualizes the entropy
+value. (a) While WLLM produces an incorrect code and less detectable watermarks with a few green tokens
+(low z-score), (b)-(d) SWEET improves both code quality and z-score by selectively embedding and detecting
+watermarks using an entropy threshold. Interestingly, (c) the z-score peaks with a moderate threshold, and (d) as the
+threshold increases, the z-score declines due to the decrease in the watermarking ratio.
+Low Entropy Sequences Avoid Being Water-
+marked. Another critical issue is when watermark
+strength is too weak to embed watermarks into a
+text with low entropy. If a red list token has a too
+high logit value to be inevitably generated, it hin-
+ders watermark detection. For example, in Figure 2
+(a), tokens with white backgrounds representing
+low entropy have few green tokens. This becomes
+much more fatal in code generation tasks where
+outcomes are relatively shorter than the plain text,
+such as asking only a code block of a function6.
+The WLLM detection method is based on a sta-
+tistical test, which involves counting the number
+of green list tokens in the entire length. However
+detecting watermarks based on a statistical test de-
+teriorates if the length is short.7
+3.2
+The SWEET Method
+SWEET can mitigate this dilemma regarding the
+watermark strength by distinguishing watermark-
+applicable tokens, meaning we embed and detect
+watermarks only within tokens with high entropy.
+Generation. The generation step of our method
+is in Algorithm 1.
+Given a tokenized prompt
+6The average token length of human-written solution codes
+in HumanEval, MBPP, and DS-1000 datasets is only 57.
+7We measured detectability according to the length of
+generated texts and observed that WLLM performs rela-
+tively poorly while SWEET is robust in detecting water-
+marks within short texts. For more details, please refer to
+Appendix G.
+x = {x0, . . . , xM−1} and already generated to-
+kens y[:t] = {y0, . . . , yt−1}, a model calculates an
+entropy value (Ht) of the probability distribution
+for yt. We then only apply the watermarking when
+Ht is higher than the threshold, τ. We randomly
+bin a vocabulary by green and red with a fixed
+green token ratio γ. If a token is selected to be
+watermarked, we add a constant δ to green tokens’
+logits, aiming to promote the sampling of the green
+tokens. By limiting the promotion of green tokens
+only to tokens with high entropy, we prevent the
+model’s logit distribution changes for tokens where
+the model has confidence (and, therefore, low en-
+tropy), resulting in preserving code quality.
+Detection. We outline our detection process
+in Algorithm 2.
+Given a token sequence y =
+{y0, . . . , yN−1}, our task is to detect watermarks
+within y; therefore, determine whether it is gen-
+erated from the specific language model. Like in
+the generation phase, we compute the entropy val-
+ues Ht for each yt. Let Nh denote the number of
+tokens that have an entropy value Ht higher than
+the threshold τ, and let Nh
+G denote the number of
+green tokens among in Nh. Finally, with the green
+list ratio among entire vocabulary γ used in the
+generation step, we compute a z-score under the
+null hypothesis where the text is not watermarked
+by
+z =
+Nh
+G −γNh
+p
+Nhγ(1 −γ)
+(1)
+
+We can say the text is watermarked more confi-
+dently as z-score goes higher. We set zthreshold as a
+cut-off score. If z > zthreshold holds, we decide that
+the watermark is embedded in y and thus generated
+by the LLM. The effect of the entropy threshold in
+the detection phase is described in the following
+section.
+3.3
+Effect of Entropy Thresholding
+This section shows that selective watermark detec-
+tion based on the entropy threshold improves the
+detectability.
+Theorem 1 implies that we can ensure a higher
+lower bound of z-score by the SWEET detection
+method than WLLM. Recalling Sec 3.1, this is
+achieved by ignoring tokens with low entropy, lead-
+ing to increases in the ratio of green tokens within
+the text and detectability.
+For the sake of theoretical analysis, we use spike
+entropy (Eq. 4), which is a variant of entropy de-
+fined in Kirchenbauer et al. (2023a). In practice,
+we use the entropy in Eq. 5.
+Theorem 1. Consider a token sequence y =
+{y0, . . . , yN−1} generated by a watermarked code
+LLM. (S0, . . . , SN−1) is a sequence of corre-
+sponding spike entropy, in which the modulus is
+(1−γ)(eδ−1)
+1+(eδ−1)γ . Let τ be an entropy threshold, Nl and
+Nh be the number of tokens whose spike entropy is
+lower or higher than the threshold.
+If the following assumption regarding the ratio
+of low entropy tokens holds
+Nl
+N ≤1 −( αS −1
+αSh −1
+)2
+then there is a lower bound of z-score that is
+always higher when the entropy threshold is ap-
+plied, where α =
+eδ
+1+(eδ−1)γ , S = ΣN
+t=1St/N, and
+Sh = ΣN
+t=1St × 1(St ≥τ)/N h.
+Remark. The assumption means choosing an
+entropy threshold that does not ignore too many
+tokens (Nl) is important.
+4
+Experiments
+We conduct a series of experiments to evaluate the
+effectiveness of our watermarking method in code
+generation for two aspects: (i) quality preserving
+ability and (ii) detection strength. Our base model
+is StarCoder (Li et al., 2023b), which is an open-
+source LLM specifically for code generation. We
+also conduct experiments on one of the general-
+purpose LLM, LLaMA2 (Touvron et al., 2023) (see
+the results in Appendix F).
+4.1
+Tasks and Metrics
+We select three Python code generation tasks, Hu-
+manEval (Chen et al., 2021), MBPP (Austin et al.,
+2021), and DS-1000 (Lai et al., 2023), as our main
+testbeds. These tasks contain Python programming
+problems, test cases, and human-written canonical
+answers. Language models are prompted with pro-
+gramming problems and expected to generate the
+correct code that can pass the test cases. To eval-
+uate our approach’s performance in more diverse
+software development contexts, such as other lan-
+guages or other code generation scopes, we also in-
+clude two more datasets: HumanEvalPack (Muen-
+nighoff et al., 2024) and ClassEval (Du et al., 2023).
+Please refer to Appendix E for implementation de-
+tails of these benchmarks.
+To evaluate the functional quality of generated
+source code, we use pass@k (Chen et al., 2021) by
+generating n(> k) outputs for each programming
+problems. This metric estimates the percentage
+of code generated correctly-performing. For the
+detection ability, we use AUROC (i.e., Area Under
+ROC) value as a main metric. We also report the
+true positive rate (TPR; correctly detecting LLM-
+generated code as LLM-generated) when the false
+positive rate (FPR; falsely detecting human-written
+code as LLM-generated) is confined to be lower
+than 5%. This is to observe the detection ratio of a
+practical setting, where high false positive is more
+undesirable than false negative.
+4.2
+Baselines
+We compare SWEET with machine-generated
+text detection baselines. Post-hoc detection base-
+lines do not need any modification during gener-
+ation so that they never impair the quality of the
+model output. LOGP(X), LOGRANK (Gehrmann
+et al., 2019), and DETECTGPT (Mitchell et al.,
+2023) are zero-shot detection methods that need
+no labeled datasets. GPTZERO (Tian and Cui,
+2023) and OPENAI CLASSIFIER (Solaiman et al.,
+2019) are trained classifiers. For Watermarking-
+based methods, we have included two base-
+lines: WLLM (Kirchenbauer et al., 2023a) and
+EXP-EDIT (Kuditipudi et al., 2023). To embed a
+watermark, methods that distort the model’s sam-
+pling distribution, such as WLLM or ours, tend to
+have better detection ability, but degradation of text
+
+Method
+HUMANEVAL
+MBPP
+DS-1000
+PASS@1
+AUROC
+TPR
+FPR
+PASS@1
+AUROC
+TPR
+FPR
+PASS@1
+AUROC
+TPR
+FPR
+Non-watermarked
+33.4
+-
+-
+-
+37.8
+-
+-
+-
+26.3
+-
+-
+-
+Non-watermarked (w/ high entropy)
+18.3
+-
+-
+-
+21.4
+-
+-
+-
+12.7
+-
+-
+-
+Post-hoc
+LOG P(X)
+33.4
+0.533
+0.113
+< 0.05
+37.8
+0.525
+0.054
+< 0.05
+26.3
+0.566
+0.100
+< 0.05
+LOGRANK
+0.553
+0.127
+< 0.05
+0.527
+0.052
+< 0.05
+0.562
+0.105
+< 0.05
+DETECTGPT (T5-3B)
+0.549
+0.092
+< 0.05
+0.531
+0.040
+< 0.05
+0.433
+0.070
+< 0.05
+DETECTGPT
+0.533
+0.165
+< 0.05
+0.565
+0.158
+< 0.05
+0.606
+0.113
+< 0.05
+GPTZERO
+0.521
+0.122
+< 0.05
+0.449
+0.026
+< 0.05
+0.539
+0.063
+< 0.05
+OPENAI CLASSIFIER
+0.518
+0.053
+< 0.05
+0.500
+0.036
+< 0.05
+0.524
+0.075
+< 0.05
+Watermarking
+EXP-EDIT
+33.6
+0.489
+0.085
+< 0.05
+37.5
+0.536
+0.044
+< 0.05
+26.2
+0.546
+0.066
+< 0.05
+EXP-EDIT (w/ high entropy)
+19.3
+0.733
+0.427
+< 0.05
+22.7
+0.744
+0.33
+< 0.05
+12.7
+0.743
+0.378
+< 0.05
+WLLM (∆PASS@1 ∼−10%)⋆
+29.6
+0.822
+0.402
+< 0.05
+34.5
+0.718
+0.178
+< 0.05
+23.9
+0.627
+0.152
+< 0.05
+SWEET (∆PASS@1 ∼−10%)⋆
+32.6
+0.943
+0.835
+< 0.05
+33.8
+0.873
+0.590
+< 0.05
+23.7
+0.815
+0.384
+< 0.05
+WLLM (AUROC≥0.9)†
+25.3
+0.904
+0.652
+< 0.05
+24.2
+0.930
+0.718
+< 0.05
+8.6
+0.944
+0.793
+< 0.05
+SWEET (AUROC≥0.9)†
+32.6
+0.943
+0.835
+< 0.05
+33.2
+0.906
+0.548
+< 0.05
+18.8
+0.924
+0.649
+< 0.05
+Table 1: Main results of code generation performance and detection ability. Since calibration on watermarking
+strength leads to trade-offs between code generation quality and detection ability, we present two results for WLLM
+and SWEET. ⋆for the best detection score (i.e., AUROC and TPR) while allowing a code generation quality
+decrease of ∼10% compared to Non-watermarked, and † for the best code generation quality (PASS@1) among
+AUROC ≥0.9. The selected points are shown in Figure 3. We add EXP-EDIT and a Non-watermarked baseline
+with a high entropy setting (i.e., temperature=1.0 and top-p=1.0).
+quality may arise. On the other hand, EXP-EDIT
+is expected to cause no degradation in text quality
+as they do not distort the sampling distribution of
+the model. 8 More details of implementation are in
+Appendix D.
+5
+Results
+5.1
+Main Results
+Table 1 presents results from all baselines and our
+approach. In WLLM and SWEET, there is a clear
+trade-off between detection and code generation
+ability depending on the watermarking strength.
+Therefore, we measure the maximum scores of
+one domain while setting a lower bound for the
+scores of other domain. Specifically, to measure
+AUROC scores, we find the best AUROC scores
+around 90% of the pass@1 performance of the non-
+watermarked base model. On the other hand, for
+measuring pass@1, we select from those with an
+AUROC of 0.9 or higher.
+Detection Performance. Table 1 shows that
+overall, our SWEET method outperforms all base-
+lines in detecting machine-generated code with
+a price of 10% degradation of code functional-
+ity.
+Both in the MBPP and DS-1000 datasets,
+SWEET achieves AUROC of 0.873 and 0.815,
+8When evaluating code generation performance through
+pass@1, a low temperature was applied to all models. How-
+ever, the spiky distribution resulting from the low temperature
+hindered EXP-EDIT from adequately embedding watermark-
+ing. Therefore, we have also included EXP-EDIT baseline
+with a high entropy by setting temperature=1.0 and top-p=1.0.
+respectively, whereas none of the baselines ex-
+ceeded 0.8. SWEET even achieves an AUROC
+of 0.943 in HumanEval with a 2.4% degradation
+of code functionality. However, when only near
+10% degradation of code functionality is allowed,
+WLLM shows lower detection performance than
+our method. In the case of the distortion-free wa-
+termarking method, due to the lower entropy of the
+code generation task, EXP-EDIT fails to achieve
+an AUROC score exceeding 0.6 in all cases, and
+even EXP-EDIT with high entropy setting could
+not outperform our methods with regard of the de-
+tection performance. While all post-hoc detection
+baselines preserve code functionality as they do not
+modify generated code, none of them achieve an
+AUROC score above 0.6.9
+Code Quality Preservation. In the last two
+rows of Table 1, despite the inevitable text qual-
+ity degradation caused by WLLM and SWEET,
+our SWEET method preserves code functional-
+ity much more while maintaining the high detec-
+tion ability of AUROC > 0.9 when compared to
+WLLM. Specifically, pass@1 of WLLM for Hu-
+manEval decreases from 33.4 to 25.3, a 24.3% loss
+in the code execution pass rate. Similarly, for the
+MBPP and the DS-1000 dataset, the drops in per-
+formances are 36.0% and 67.3%, respectively. On
+the other hand, our approach loses only 2.4% (Hu-
+manEval), 12.2% (MBPP), and 28.5% (DS-1000),
+9We defer a more in-depth discussion about the breakdown
+of Post-hoc methods to Appendix K.
+
+Method
+HUMANEVALPACK - C++
+HUMANEVALPACK - JAVA
+CLASSEVAL
+PASS@1
+AUROC
+TPR
+FPR
+PASS@1
+AUROC
+TPR
+FPR
+PASS@5
+AUROC
+TPR
+FPR
+Non-watermarked
+29.4
+-
+-
+-
+31.5
+-
+-
+-
+14.0
+-
+-
+-
+Non-watermarked (w/ high entropy)
+18.2
+-
+-
+-
+13.9
+-
+-
+-
+19.0
+-
+-
+-
+Post-hoc
+LOG P(X)
+29.4
+0.656
+0.160
+< 0.05
+31.5
+0.635
+0.127
+< 0.05
+14.0
+0.847
+0.320
+< 0.05
+LOGRANK
+0.658
+0.187
+< 0.05
+0.654
+0.240
+< 0.05
+0.821
+0.260
+< 0.05
+DETECTGPT (T5-3B)
+0.646
+0.079
+< 0.05
+0.699
+0.273
+< 0.05
+0.610
+0.140
+< 0.05
+DETECTGPT
+0.525
+0.079
+< 0.05
+0.650
+0.116
+< 0.05
+0.749
+0.210
+< 0.05
+GPTZERO
+0.486
+0.073
+< 0.05
+0.529
+0.000
+< 0.05
+0.885
+0.800
+< 0.05
+OPENAI CLASSIFIER
+0.631
+0.120
+< 0.05
+0.545
+0.087
+< 0.05
+0.503
+0.010
+< 0.05
+Watermarking
+EXP-EDIT
+28.3
+0.605
+0.091
+< 0.05
+32.1
+0.486
+0.024
+< 0.05
+21.0
+0.497
+0.020
+< 0.05
+EXP-EDIT (w/ high entropy)
+16.7
+0.749
+0.402
+< 0.05
+14.3
+0.828
+0.512
+< 0.05
+21.0
+0.513
+0.040
+< 0.05
+WLLM (∆PASS@1 ∼−10%)⋆
+25.9
+0.887
+0.604
+< 0.05
+25.5
+0.833
+0.518
+< 0.05
+12.0
+0.939
+0.840
+< 0.05
+SWEET (∆PASS@1 ∼−10%)⋆
+26.2
+0.943
+0.817
+< 0.05
+27.6
+0.862
+0.457
+< 0.05
+13.0
+0.980
+0.920
+< 0.05
+WLLM (AUROC≥0.9)†
+25.9
+0.887
+0.604
+< 0.05
+9.5
+0.947
+0.872
+< 0.05
+12.0
+0.939
+0.840
+< 0.05
+SWEET (AUROC≥0.9)†
+29.0
+0.904
+0.707
+< 0.05
+22.6
+0.969
+0.878
+< 0.05
+13.0
+0.980
+0.920
+< 0.05
+Table 2: Main results of code generation performance and detection ability on HumanEvalPack (Muennighoff
+et al., 2024) and ClassEval (Du et al., 2023). Since calibration on watermarking strength leads to trade-offs between
+code generation quality and detection ability, we present two results for WLLM and SWEET. ⋆for the best
+detection score (i.e., AUROC and TPR) while allowing a code generation quality decrease of ∼10% compared to
+Non-watermarked, and † for the best code generation quality (PASS@1) among AUROC ≥0.9. We add EXP-EDIT
+and a Non-watermarked baseline with a high entropy setting (i.e., temperature=1.0 and top-p=1.0).
+Figure 3: The tradeoff between AUROC and pass@1 of detecting real and generated samples of HumanEval, MBPP,
+and DS-1000 datasets. The pink line represents a Pareto frontier of SWEET, while the blue line represents that of
+WLLM. SWEET shows consistent dominance. The red/orange line and circles are the points used in Table 1. The
+entropy threshold for SWEET is 1.2 here, and Pareto frontier figures for all threshold values are in Figure 6.
+respectively, which are significantly less than those
+of WLLM.
+C++/Java/Class-level Code Generation. Ta-
+ble 2 presents results on other programming lan-
+guages (C++ and Java) and another code gen-
+eration scope (i.e., class-level). While preserv-
+ing code functionality much more than WLLM,
+SWEET shows the highest detection performance
+except in the Java environment, where the TPR
+score of WLLM is higher than that of SWEET.
+The results demonstrate that the efficacy of our
+methodology is not limited to certain types of pro-
+gramming languages or software development en-
+vironments. For more analysis of the results, please
+refer to Appendix E.
+5.2
+Comparison of Pareto Frontiers
+between SWEET and WLLM
+In the cases of SWEET and WLLM, watermark-
+ing strength and spans can vary depending on the
+ratio of the green list tokens γ and the logit increase
+value δ. To demonstrate that SWEET consistently
+outperforms the baseline WLLM regardless of the
+values of γ and δ, we draw Pareto frontier curves
+with axes pass@1 and AUROC in Figure 3. We ob-
+serve that the Pareto frontiers of SWEET are ahead
+
+Figure 4: Plots of code quality pass@1 and detection
+AUROC when calibrating the entropy threshold of our
+methods, SWEET, on the three code benchmarks. We
+set γ = 0.25 and δ = 3.0. While code generation
+performance increases with a higher entropy threshold,
+detection AUROC scores make an up-and-down curve.
+of those of WLLM in all three tasks. Moreover,
+as presented in Figure 6, whatever value our ap-
+proach chooses for the entropy threshold, SWEET
+outperforms the baseline in all configurations. This
+indicates that in a wide range of hyperparameter
+settings, our SWEET model can generate better
+results in terms of detection and code generation
+ability. Full results and different settings are in
+Appendix F.
+6
+Analysis
+6.1
+Impact of Entropy Thresholds
+Figure 4 presents how code generation performance
+and detecting ability trade-off when calibrating the
+entropy threshold in our method. WLLM is when
+the entropy threshold is not applied (i.e., entropy
+threshold=0). As the entropy threshold increases,
+the ratio of watermarked tokens decreases, so the
+code generation performance converges to a non-
+watermarked base model. This indicates that our
+method always lies between the WLLM and a non-
+watermarked base model in terms of code genera-
+tion performance. On the other hand, the detection
+ability, as the entropy threshold increases, reaches
+a local maximum but eventually declines. While
+our method with a moderate threshold effectively
+restricts generating the red list tokens compared to
+the WLLM, detection ability eventually decreases
+if the threshold is so high that few tokens are wa-
+termarked. We further investigate how to effec-
+tively calibrate the entropy threshold value in Ap-
+pendix H.
+6.2
+Detection Ability without Prompts
+As entropy information is required in the detection
+phase, approximating entropy values for each
+generation time step t is essential in our method.
+In the main experiments, we prepend the prompt
+used in the generation phase (e.g., the question
+of Fig.
+2) before the target code to reproduce
+the same entropy. However, we hardly know the
+prompt used for a given target code in the real
+world. Thus, instead of using the gold prompt,
+we attach a common and general prompt for code
+generation to approximate the entropy information.
+We use five general prompts as below, and their
+z-scores are averaged for use in detection.
+def solution(*args):
+"""
+Generate a solution
+"""
+<filename>solutions/solution_1.py
+# Here is the correct implementation of the code
+exercise
+def solution(*args):
+def function(*args, **kargs):
+"""
+Generate a code given the condition
+"""
+from typing import List
+def my_solution(*args, **kargs):
+"""
+Generate a solution
+"""
+def foo(*args):
+"""
+Solution that solves a problem
+"""
+Figure 8 demonstrates how the detection abil-
+ity varies when using general prompts in the Hu-
+
+Figure 5: Watermark detection performance on renamed
+variables in the code. We set γ = 0.25 and δ = 3.0 for
+WLLM and SWEET. For EXP-EDIT, we search the
+hyperparameter for the block size in [20,30,40] with a
+high entropy setting.
+manEval dataset. SWEET with general prompts
+shows lower AUROC values than the original
+SWEET, indicating inaccurately approximated en-
+tropy information impairs detection ability. Never-
+theless, it still outperforms the WLLM baseline re-
+garding detection ability, drawing a Pareto frontier
+ahead of WLLM in all entropy threshold values.
+6.3
+Use of Surrogate Model
+When detecting watermarks in a text, utilizing a
+smaller LM as a surrogate could be more compu-
+tationally efficient and cost-effective (Wang et al.,
+2023). We investigate the impact of employing
+this surrogate model during the detection phase.
+Specifically, we generate watermarked code using
+the original model (LLaMA2-13B) and detect wa-
+termarks using a smaller model (LLaMA2-7B).
+In the results of Figure 10, the detection perfor-
+mance declines are insignificant, and our approach
+utilizing the surrogate model continues to surpass
+the baseline. Such performance preservation may
+be due to that LLaMA2 7B and 13B are trained
+on the identical training corpus (Touvron et al.,
+2023). Further analysis for computational cost can
+be found in Appendix I.
+6.4
+Robustness to Paraphrasing Attacks
+Even with the text watermarked, a malicious user
+might attempt to remove watermarks in the text by
+paraphrasing (Krishna et al., 2023; Sadasivan et al.,
+2023). Paraphrasing the code text is more restric-
+tive than dealing with plain text because it must
+avoid triggering any code malfunctions. We assess
+the robustness of watermarking methods against
+paraphrasing by employing two types of attacks
+- changing the names of variables and utilizing a
+commercial code refactoring service.10 Specifi-
+cally, for each watermark method, we choose 273
+source codes from the MBPP task, for which all
+three methods succeed in generating with no syntax
+error. In the code renaming attack, we select vari-
+ables in the watermarked code and rename them
+with randomly generated strings of varying lengths,
+ranging from 2 to 5 characters. We use five random
+seeds for renaming.
+Figure 5 presents the results of the detection per-
+formance on the paraphrased code. All watermark-
+ing methods show the decline of AUROC scores
+when the extent of paraphrasing increases, while
+our approaches continue to show better perfor-
+mances than baselines. However, our approaches
+also show that the AUROC scores drop to about
+0.8 when all variables are renamed. We found that
+this is because variable names comprise a large
+proportion of high entropy tokens in the code text
+(See Appendix J for details).
+7
+Conclusion
+We identified and emphasized the need for Code
+LLM watermarking, and formalized it for the first
+time.
+Despite the rapid advance of coding ca-
+pability of LLMs, the necessary measures to en-
+courage the safe usage of code generation models
+have not been implemented yet. Our experiments
+showed that existing watermarking and detection
+techniques failed to properly operate under the
+code generation setting. The failure occurred in
+two modes: either 1) the code does not watermark
+properly (hence, cannot be detected), or 2) the wa-
+termarked code failed to properly execute (degra-
+dation of quality). Our proposed method SWEET,
+on the other hand, improved both of these failure
+modes to a certain extent by introducing selective
+entropy thresholding which filters tokens that are
+least relevant to execution quality. In code gener-
+ation tasks, our method performs better than base-
+lines, including post-hoc detection methods, while
+achieving less code quality degradation. More-
+over, comprehensive analysis demonstrates that
+our method still works well in real-world settings,
+specifically when the prompts are not given, uti-
+lizing even a smaller surrogate model, or under
+paraphrasing attacks.
+10https://codepal.ai/code-refactor
+
+Limitations
+We identify the limitations of this work and suggest
+ways to mitigate them. First, two issues are shared
+by the status quo of this field as follows. (1) Ro-
+bustness against paraphrasing attacks: As users can
+tailor LLM’s code to their specific needs, it is cru-
+cial to be robust against paraphrasing attacks. We
+addressed this issue in Section 6.4 and left further
+robustness enhancement for future work. (2) Possi-
+bilities of watermark forgery: An attacker may pry
+out the watermarking rules, and O(|V|)2 runs in
+the brute-force mechanism enable it. Against the
+attack, one can apply techniques enhancing the wa-
+termarking model’s security, such as dividing the
+green/red list depending on prior h > 1 tokens, as
+mentioned in the WLLM paper, or applying meth-
+ods like SelfHash (Kirchenbauer et al., 2023b).
+For our work, two additional issues exist as fol-
+lows. (1) Entropy threshold calibration: We demon-
+strate that our method outperforms the baselines
+in the broad entropy threshold range (see Sec 6.1)
+and investigate how to calibrate the entropy thresh-
+old effectively (see Appendix H). However, we still
+need entropy threshold tuning to obtain the best per-
+formance, which costs a computation. (2) Need for
+the source LLM during detection: SWEET works
+in a white-box setting. Although it has been shown
+that employing even a smaller surrogate LM can
+still maintain the detection performances to some
+degree (see Sec 6.3), this can be a computational
+burden for some users who want to apply our work.
+Ethical Statement
+Although watermarking methods are designed to
+address all potential misuse of LLMs by detecting
+machine-generated texts, they can simultaneously
+pose a new risk. For example, if a watermarking
+mechanism for a specific LLM is leaked to the pub-
+lic, a malicious user aware of this mechanism could
+abuse the watermarks to create unethical texts em-
+bedded with the model’s watermarks. To prevent
+such scenarios, we recommend that all users exer-
+cise caution to avoid exposing the detailed mecha-
+nism, such as the key value for the hash function
+used to divide green and red lists in our method.
+Acknowledgements
+We would like to thank the anonymous review-
+ers for their valuable feedback.
+This work
+was supported by SNU-NAVER Hyperscale AI
+Center, Institute of Information & Communica-
+tions Technology Planning & Evaluation (IITP)
+grant funded by the Korea government (MSIT)
+(No. RS-2019-II191082, SW StarLab), the Na-
+tional Research Foundation of Korea (NRF)
+grant funded by the Korea government (MSIT)
+(No. 2023R1A2C2005573), and the Basic Science
+Research Program through the National Research
+Foundation of Korea(NRF) funded by the Ministry
+of Education(RS-2023-00274280).
+References
+Sahar Abdelnabi and Mario Fritz. 2021. Adversarial wa-
+termarking transformer: Towards tracing text prove-
+nance with data hiding. In 2021 IEEE Symposium
+on Security and Privacy (SP), pages 121–140. IEEE,
+IEEE.
+Mikhail J. Atallah, Victor Raskin, Michael Crogan,
+Christian Hempelmann, Florian Kerschbaum, Dina
+Mohamed, and Sanket Naik. 2001.
+Natural lan-
+guage watermarking: Design, analysis, and a proof-
+of-concept implementation. In Information Hiding,
+pages 185–200. Springer, Springer Berlin Heidel-
+berg.
+Mikhail J. Atallah, Victor Raskin, Christian F. Hempel-
+mann, Mercan Karahan, Radu Sion, Umut Topkara,
+and Katrina E. Triezenberg. 2002. Natural language
+watermarking and tamperproofing. In Information
+Hiding, pages 196–212. Springer, Springer Berlin
+Heidelberg.
+Jacob Austin, Augustus Odena, Maxwell Nye, Maarten
+Bosma, Henryk Michalewski, David Dohan, Ellen
+Jiang, Carrie Cai, Michael Terry, Quoc Le, et al. 2021.
+Program synthesis with large language models. arXiv
+preprint arXiv:2108.07732.
+Mohammad Bavarian, Heewoo Jun, Nikolas Tezak,
+John Schulman, Christine McLeavey, Jerry Tworek,
+and Mark Chen. 2022.
+Efficient training of lan-
+guage models to fill in the middle. arXiv preprint
+arXiv:2207.14255.
+Nicholas Carlini,
+Florian Tramer,
+Eric Wallace,
+Matthew Jagielski, Ariel Herbert-Voss, Katherine
+Lee, Adam Roberts, Tom B Brown, Dawn Song, Ul-
+far Erlingsson, et al. 2021. Extracting training data
+from large language models. In USENIX Security
+Symposium, volume 6.
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming
+Yuan, Henrique Ponde de Oliveira Pinto, Jared Ka-
+plan, Harri Edwards, Yuri Burda, Nicholas Joseph,
+Greg Brockman, et al. 2021.
+Evaluating large
+language models trained on code. arXiv preprint
+arXiv:2107.03374.
+Miranda Christ, Sam Gunn, and Or Zamir. 2023. Un-
+detectable watermarks for language models. arXiv
+preprint arXiv:2306.09194.
+
+Ayan Dey, Sukriti Bhattacharya, and Nabendu Chaki.
+2018. Software watermarking: Progress and chal-
+lenges. INAE Letters, 4(1):65–75.
+Xueying Du, Mingwei Liu, Kaixin Wang, Hanlin Wang,
+Junwei Liu, Yixuan Chen, Jiayi Feng, Chaofeng
+Sha, Xin Peng, and Yiling Lou. 2023. Classeval:
+A manually-crafted benchmark for evaluating llms
+on class-level code generation.
+Daniel Fried, Armen Aghajanyan, Jessy Lin, Sida Wang,
+Eric Wallace, Freda Shi, Ruiqi Zhong, Wen-tau Yih,
+Luke Zettlemoyer, and Mike Lewis. 2023. Incoder:
+A generative model for code infilling and synthesis.
+In International Conference on Learning Representa-
+tions.
+Sebastian Gehrmann, Hendrik Strobelt, and Alexander
+Rush. 2019. GLTR: Statistical detection and visual-
+ization of generated text. In Proceedings of the 57th
+Annual Meeting of the Association for Computational
+Linguistics: System Demonstrations, pages 111–116,
+Florence, Italy. Association for Computational Lin-
+guistics.
+GeorgiaTechResearchInstitute.
+2023.
+starcoder-
+gpteacher-code-instruct.
+Chenchen Gu, Xiang Lisa Li, Percy Liang, and Tat-
+sunori Hashimoto. 2023.
+On the learnability of
+watermarks for language models.
+arXiv preprint
+arXiv:2312.04469.
+Suriya Gunasekar, Yi Zhang, Jyoti Aneja, Caio
+César Teodoro Mendes, Allie Del Giorno, Sivakanth
+Gopi, Mojan Javaheripi, Piero Kauffmann, Gustavo
+de Rosa, Olli Saarikivi, et al. 2023. Textbooks are all
+you need. arXiv preprint arXiv:2306.11644.
+Biyang Guo, Xin Zhang, Ziyuan Wang, Minqi Jiang,
+Jinran Nie, Yuxuan Ding, Jianwei Yue, and Yupeng
+Wu. 2023. How close is chatgpt to human experts?
+comparison corpus, evaluation, and detection. arXiv
+preprint arXiv:2301.07597.
+James Hamilton and Sebastian Danicic. 2011.
+A
+survey of static software watermarking.
+In 2011
+World Congress on Internet Security (WorldCIS-
+2011), pages 100–107. IEEE, IEEE.
+Julian Hazell. 2023. Large language models can be used
+to effectively scale spear phishing campaigns. arXiv
+preprint arXiv:2305.06972.
+Jingxuan He and Martin Vechev. 2023. Large language
+models for code: Security hardening and adversarial
+testing. arXiv preprint arXiv:2302.05319.
+Xuanli He, Qiongkai Xu, Lingjuan Lyu, Fangzhao Wu,
+and Chenguang Wang. 2022a. Protecting intellectual
+property of language generation apis with lexical
+watermark. In Proceedings of the AAAI Conference
+on Artificial Intelligence, volume 36, pages 10758–
+10766.
+Xuanli He, Qiongkai Xu, Yi Zeng, Lingjuan Lyu,
+Fangzhao Wu, Jiwei Li, and Ruoxi Jia. 2022b. Cater:
+Intellectual property protection on text generation
+apis via conditional watermarks. Advances in Neural
+Information Processing Systems, 35:5431–5445.
+Ari Holtzman, Jan Buys, Li Du, Maxwell Forbes, and
+Yejin Choi. 2020. The curious case of neural text de-
+generation. In International Conference on Learning
+Representations.
+Zhengmian Hu, Lichang Chen, Xidong Wu, Yihan Wu,
+Hongyang Zhang, and Heng Huang. 2023. Unbiased
+watermark for large language models. arXiv preprint
+arXiv:2310.10669.
+Hamel Husain, Ho-Hsiang Wu, Tiferet Gazit, Miltiadis
+Allamanis, and Marc Brockschmidt. 2019. Code-
+searchnet challenge: Evaluating the state of semantic
+code search. arXiv preprint arXiv:1909.09436.
+Daphne Ippolito, Daniel Duckworth, Chris Callison-
+Burch, and Douglas Eck. 2020. Automatic detec-
+tion of generated text is easiest when humans are
+fooled. In Proceedings of the 58th Annual Meeting of
+the Association for Computational Linguistics, pages
+1808–1822, Online. Association for Computational
+Linguistics.
+Zunera Jalil and Anwar M. Mirza. 2009. A review of
+digital watermarking techniques for text documents.
+In 2009 International Conference on Information and
+Multimedia Technology, pages 230–234. IEEE, IEEE.
+Young-Won Kim, Kyung-Ae Moon, and Il-Seok Oh.
+2003. A text watermarking algorithm based on word
+classification and inter-word space statistics. In Sev-
+enth International Conference on Document Analysis
+and Recognition, 2003. Proceedings., pages 775–779.
+Citeseer, IEEE Comput. Soc.
+John Kirchenbauer,
+Jonas Geiping,
+Yuxin Wen,
+Jonathan Katz, Ian Miers, and Tom Goldstein. 2023a.
+A watermark for large language models. The Fortieth
+International Conference on Machine Learning.
+John Kirchenbauer, Jonas Geiping, Yuxin Wen, Manli
+Shu, Khalid Saifullah, Kezhi Kong, Kasun Fer-
+nando, Aniruddha Saha, Micah Goldblum, and Tom
+Goldstein. 2023b.
+On the reliability of water-
+marks for large language models. arXiv preprint
+arXiv:2306.04634.
+Kalpesh Krishna, Yixiao Song, Marzena Karpinska,
+John Wieting, and Mohit Iyyer. 2023. Paraphras-
+ing evades detectors of ai-generated text, but re-
+trieval is an effective defense.
+arXiv preprint
+arXiv:2303.13408.
+Rohith
+Kuditipudi,
+John
+Thickstun,
+Tatsunori
+Hashimoto, and Percy Liang. 2023.
+Robust
+distortion-free watermarks for language models.
+arXiv preprint arXiv:2307.15593.
+
+Yuhang Lai, Chengxi Li, Yiming Wang, Tianyi Zhang,
+Ruiqi Zhong, Luke Zettlemoyer, Wen-Tau Yih,
+Daniel Fried, Sida Wang, and Tao Yu. 2023. DS-
+1000: A natural and reliable benchmark for data sci-
+ence code generation. In Proceedings of the 40th
+International Conference on Machine Learning, vol-
+ume 202 of Proceedings of Machine Learning Re-
+search, pages 18319–18345. PMLR.
+Jun Li and Quan Liu. 2010. Design of a software wa-
+termarking algorithm based on register allocation. In
+2010 2nd International Conference on E-business
+and Information System Security, pages 1–4. IEEE,
+IEEE.
+Linyang Li, Pengyu Wang, Ke Ren, Tianxiang Sun, and
+Xipeng Qiu. 2023a. Origin tracing and detecting of
+llms. arXiv preprint arXiv:2304.14072.
+Raymond Li, Loubna Ben Allal, Yangtian Zi, Niklas
+Muennighoff, Denis Kocetkov, Chenghao Mou, Marc
+Marone, Christopher Akiki, Jia Li, Jenny Chim, et al.
+2023b.
+Starcoder: may the source be with you!
+arXiv preprint arXiv:2305.06161.
+Zongjie Li, Chaozheng Wang, Shuai Wang, and Cuiyun
+Gao. 2023c. Protecting intellectual property of large
+language model-based code generation apis via wa-
+termarks. In Proceedings of the 2023 ACM SIGSAC
+Conference on Computer and Communications Secu-
+rity, pages 2336–2350.
+Aiwei Liu, Leyi Pan, Xuming Hu, Shu’ang Li, Lijie
+Wen, Irwin King, and Philip S. Yu. 2023a. An un-
+forgeable publicly verifiable watermark for large lan-
+guage models.
+Aiwei Liu, Leyi Pan, Xuming Hu, Shiao Meng, and
+Lijie Wen. 2023b. A semantic invariant robust wa-
+termark for large language models. arXiv preprint
+arXiv:2310.06356.
+Aiwei Liu, Leyi Pan, Yijian Lu, Jingjing Li, Xuming
+Hu, Lijie Wen, Irwin King, and Philip S. Yu. 2024.
+A survey of text watermarking in the era of large
+language models.
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+dar Joshi, Danqi Chen, Omer Levy, Mike Lewis,
+Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+Roberta: A robustly optimized bert pretraining ap-
+proach. arXiv preprint arXiv:1907.11692.
+Ziyang Luo, Can Xu, Pu Zhao, Qingfeng Sun, Xi-
+ubo Geng, Wenxiang Hu, Chongyang Tao, Jing Ma,
+Qingwei Lin, and Daxin Jiang. 2023. Wizardcoder:
+Empowering code large language models with evol-
+instruct. arXiv preprint arXiv:2306.08568.
+Haoyu Ma, Chunfu Jia, Shijia Li, Wantong Zheng,
+and Dinghao Wu. 2019.
+Xmark: Dynamic soft-
+ware watermarking using collatz conjecture. IEEE
+Transactions on Information Forensics and Security,
+14(11):2859–2874.
+Hasan Mesut Meral, Bülent Sankur, A. Sumru Özsoy,
+Tunga Güngör, and Emre Sevinç. 2009. Natural lan-
+guage watermarking via morphosyntactic alterations.
+Computer Speech & Language, 23(1):107–125.
+Yisroel Mirsky, Ambra Demontis, Jaidip Kotak, Ram
+Shankar, Deng Gelei, Liu Yang, Xiangyu Zhang,
+Maura Pintor, Wenke Lee, Yuval Elovici, and Bat-
+tista Biggio. 2023. The threat of offensive AI to
+organizations. Computers & Security, 124:103006.
+Eric Mitchell, Yoonho Lee, Alexander Khazatsky,
+Christopher D Manning, and Chelsea Finn. 2023. De-
+tectgpt: Zero-shot machine-generated text detection
+using probability curvature. The Fortieth Interna-
+tional Conference on Machine Learning.
+Sandra Mitrovi´c, Davide Andreoletti, and Omran Ay-
+oub. 2023. Chatgpt or human? detect and explain.
+explaining decisions of machine learning model for
+detecting short chatgpt-generated text.
+Niklas Muennighoff, Qian Liu, Armel Randy Ze-
+baze, Qinkai Zheng, Binyuan Hui, Terry Yue Zhuo,
+Swayam Singh, Xiangru Tang, Leandro Von Werra,
+and Shayne Longpre. 2024. Octopack: Instruction
+tuning code large language models. In The Twelfth
+International Conference on Learning Representa-
+tions.
+Ginger Myles, Christian Collberg, Zachary Heidepriem,
+and Armand Navabi. 2005. The evaluation of two
+software watermarking algorithms. Software: Prac-
+tice and Experience, 35(10):923–938.
+Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu, Huan
+Wang, Yingbo Zhou, Silvio Savarese, and Caiming
+Xiong. 2023. Codegen: An open large language
+model for code with multi-turn program synthesis. In
+The Eleventh International Conference on Learning
+Representations.
+OpenAI. 2023a. Gpt-4 technical report. OpenAI Blog.
+OpenAI. 2023b. New ai classifier for indicating ai-
+written text. OpenAI Blog.
+Hammond Pearce, Baleegh Ahmad, Benjamin Tan,
+Brendan Dolan-Gavitt, and Ramesh Karri. 2022.
+Asleep at the keyboard? assessing the security of
+GitHub copilot’s code contributions. In 2022 IEEE
+Symposium on Security and Privacy (SP), pages 754–
+768. IEEE, IEEE.
+Jie Ren, Han Xu, Yiding Liu, Yingqian Cui, Shuaiqiang
+Wang, Dawei Yin, and Jiliang Tang. 2023.
+A
+robust semantics-based watermark for large lan-
+guage model against paraphrasing. arXiv preprint
+arXiv:2311.08721.
+Vinu Sankar Sadasivan, Aounon Kumar, Sriram Bala-
+subramanian, Wenxiao Wang, and Soheil Feizi. 2023.
+Can ai-generated text be reliably detected? arXiv
+preprint arXiv:2303.11156.
+
+Gustavo Sandoval, Hammond A. Pearce, Teo Nys,
+Ramesh Karri, Siddharth Garg, and Brendan Dolan-
+Gavitt. 2023. Lost at c: A user study on the security
+implications of large language model code assistants.
+In 32nd USENIX Security Symposium (USENIX Se-
+curity 23).
+Irene Solaiman, Miles Brundage, Jack Clark, Amanda
+Askell, Ariel Herbert-Voss, Jeff Wu, Alec Rad-
+ford, Gretchen Krueger, Jong Wook Kim, Sarah
+Kreps, et al. 2019. Release strategies and the so-
+cial impacts of language models.
+arXiv preprint
+arXiv:1908.09203.
+Yuki Takezawa, Ryoma Sato, Han Bao, Kenta Niwa,
+and Makoto Yamada. 2023. Necessary and sufficient
+watermark for large language models. arXiv preprint
+arXiv:2310.00833.
+Edward Tian and Alexander Cui. 2023. Gptzero: To-
+wards detection of ai-generated text using zero-shot
+and supervised methods.
+Umut Topkara, Mercan Topkara, and Mikhail J. Atallah.
+2006. The hiding virtues of ambiguity. In Proceed-
+ings of the 8th workshop on Multimedia and security,
+pages 164–174. ACM.
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-
+bert, Amjad Almahairi, Yasmine Babaei, Nikolay
+Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti
+Bhosale, et al. 2023.
+Llama 2:
+Open founda-
+tion and fine-tuned chat models.
+arXiv preprint
+arXiv:2307.09288.
+Priyan Vaithilingam, Tianyi Zhang, and Elena L Glass-
+man. 2022. Expectation vs. experience: Evaluating
+the usability of code generation tools powered by
+large language models. In Chi conference on hu-
+man factors in computing systems extended abstracts,
+pages 1–7.
+Lean Wang, Wenkai Yang, Deli Chen, Hao Zhou,
+Yankai Lin, Fandong Meng, Jie Zhou, and Xu Sun.
+2023. Towards codable text watermarking for large
+language models. arXiv preprint arXiv:2307.15992.
+Yilong Wang, Daofu Gong, Bin Lu, Fei Xiang, and
+Fenlin Liu. 2018. Exception handling-based dynamic
+software watermarking. IEEE Access, 6:8882–8889.
+Kangxi Wu, Liang Pang, Huawei Shen, Xueqi Cheng,
+and Tat-Seng Chua. 2023. LLMDet: A third party
+large language models generated text detection tool.
+In Findings of the Association for Computational Lin-
+guistics: EMNLP 2023, pages 2113–2133, Singapore.
+Association for Computational Linguistics.
+Xi Yang, Jie Zhang, Kejiang Chen, Weiming Zhang,
+Zehua Ma, Feng Wang, and Nenghai Yu. 2022. Trac-
+ing text provenance via context-aware lexical sub-
+stitution. In Proceedings of the AAAI Conference
+on Artificial Intelligence, volume 36, pages 11613–
+11621. Association for the Advancement of Artificial
+Intelligence (AAAI).
+Xianjun Yang, Wei Cheng, Linda Petzold, William Yang
+Wang, and Haifeng Chen. 2023. Dna-gpt: Divergent
+n-gram analysis for training-free detection of gpt-
+generated text. arXiv preprint arXiv:2305.17359.
+KiYoon Yoo, Wonhyuk Ahn, Jiho Jang, and Nojun
+Kwak. 2023. Robust natural language watermark-
+ing through invariant features. In Proceedings of the
+61th Annual Meeting of the Association for Compu-
+tational Linguistics. Association for Computational
+Linguistics.
+Xiao Yu, Yuang Qi, Kejiang Chen, Guoqiang Chen,
+Xi Yang, Pengyuan Zhu, Weiming Zhang, and Neng-
+hai Yu. 2023. Gpt paternity test: Gpt generated text
+detection with gpt genetic inheritance. arXiv preprint
+arXiv:2305.12519.
+Xuandong Zhao, Prabhanjan Ananth, Lei Li, and
+Yu-Xiang Wang. 2023.
+Provable robust water-
+marking for ai-generated text.
+arXiv preprint
+arXiv:2306.17439.
+Qinkai Zheng, Xiao Xia, Xu Zou, Yuxiao Dong, Shan
+Wang, Yufei Xue, Zihan Wang, Lei Shen, Andi Wang,
+Yang Li, et al. 2023. Codegeex: A pre-trained model
+for code generation with multilingual evaluations on
+humaneval-x. arXiv preprint arXiv:2303.17568.
+
+A
+Preliminaries for WLLM
+In this section, we provide brief preliminaries
+for Kirchenbauer et al. (2023a). For a given lan-
+guage model fLM with vocabulary V, the likelihood
+probability of a token yt is calculated as follow:
+lt = fLM(x, y[:t]),
+(2)
+pt,i =
+eli
+t
+P|V|
+i=1 eli
+t
+,
+(3)
+where x
+=
+{x0, . . . , xM−1} and y[:t]
+=
+{y1, . . . , yt−1} are a M-length tokenized prompt
+and the generated token sequence, respectively, and
+lt ∈R|V| is the logit vector.
+Watermarking in LM-generated Text.
+In the
+watermarking (Kirchenbauer et al., 2023a), the en-
+tire tokens in V at each time-step are randomly
+binned into the green Gt and red groups Rt in pro-
+portions of γ and 1 −γ (γ ∈(0, 1)), respectively.
+The method increases the logits of green group to-
+kens by adding a fixed scalar δ, promoting them to
+be sampled at each position. Thus, watermarked
+LM-generated text is more likely than γ to contain
+the green group tokens. On the other hand, since
+humans have no knowledge of the hidden green-
+red rule, the proportion of green group tokens in
+human-written text is expected to be close to γ.
+The watermarked text is detected through a one-
+sided z-test by testing the null hypothesis where
+the text is not watermarked. The z-score is cal-
+culated using the number of recognized green to-
+kens in the text. Then, the testing text is consid-
+ered as watermarked if the z-score is greater than
+zthreshold. Note that the detection algorithm with the
+higher zthreshold can result the lower false positive
+rate (FPR) and reduce Type I errors.
+Spike Entropy Kirchenbauer et al. (2023a) used
+spike entropy for measuring how spread out a dis-
+tribution is. Given a token probability vector p and
+a scalar m, spike entropy of p with modulus m is
+defined as:
+S(p, m) =
+X
+pk
+1 + mpk
+.
+(4)
+B
+Watermark Embedding/Detecting
+Algorithm of SWEET
+Algorithms 1 and 2 show the detailed steps of gen-
+erating a watermark and later detecting it using our
+selective entropy thresholding method (SWEET).
+Algorithm 1 Generation Algorithm of SWEET
+1: Input:
+tokenized
+prompt
+x
+=
+{x1, . . . , xM−1};
+entropy
+threshold
+τ ∈[0, log |V|], γ ∈(0, 1), δ > 0;
+2: for t = 0, 1, 2, . . . do
+3:
+Compute a logit vector lt by (2);
+4:
+Compute a probability vector pt by (3);
+5:
+Compute an entropy Ht by (5);
+6:
+if Ht > τ then
+7:
+Compute a hash of token yt−1, and use it
+as a seed for a random number generator;
+8:
+Randomly divide V into Gt of size γ|V|
+and Rt of size (1 −γ)|V|;
+9:
+Add δ to the logits of tokens in Gt;
+10:
+end if
+11:
+Sample yt;
+12: end for
+Algorithm 2 Detection Algorithm of SWEET
+1: Input: tokenized prompt x; token sequence to
+be tested y = {y0, . . . , yN−1}; entropy thresh-
+old τ ∈[0, log |V|], γ ∈(0, 1), zthreshold > 0;
+2: Set Nh = 0 and Nh
+G = 0;
+3: for t = 0, 1, 2, . . . N −1 do
+4:
+Compute a logit vector lt by (2);
+5:
+Compute a probability vector pt by (3);
+6:
+Compute an entropy Ht by (5);
+7:
+if Ht > τ then
+8:
+Nh ←Nh + 1;
+9:
+Compute a hash of token yt−1, and use it
+as a seed for a random number generator;
+10:
+Recover Gt and Rt;
+11:
+if yt ∈Gt then
+12:
+Nh
+G ←Nh
+G + 1;
+13:
+end if
+14:
+end if
+15: end for
+16: Compute z-score by (1);
+17: if z > zthreshold then
+18:
+return True; (i.e., y is watermarked)
+19: else
+20:
+return False;
+21: end if
+Instead of the spike entropy used in WLLM, we
+use the classical Shannon entropy. Given a token
+probability distibution vector p, the entropy of p is
+computed by
+Ht = −
+X
+pk log pk.
+(5)
+
+C
+Proof of Theorem 1
+We begin with a lemma from Kirchenbauer et al.
+(2023a), which predicts the probability of a green
+list token sampled from a language model employ-
+ing the watermarking.
+In our proof, we predict the lower bounds of z-
+score when detecting watermarks via WLLM or
+SWEET methods and compare the z-score lower
+bounds.
+Lemma C.1. Suppose p ∈(0, 1)|V| is a raw prob-
+ability vector generated from a language model
+where |V| is the vocabulary size.
+Before sam-
+pling p, watermarks are embedded by dividing
+randomly a green list of size γ|V| and a red list
+of size (1 −γ)|V| for some value γ ∈(0, 1). It
+then promotes the logits of tokens in the green list
+by δ. When sampling a token index k from this
+watermarked distribution, the probability that the
+token is sampled from the green list (considering
+the randomness of green list) is at least
+P[k ∈G] ≥
+γeδ
+1 + (eδ −1)γ S(p, (1 −γ)(eδ −1)
+1 + (eδ −1)γ ).
+Let’s begin the proof.
+Proof. In WLLM, we consider all tokens in y =
+{y0, . . . , yN−1} for detection. We can get a lower
+bound of the number of green list tokens in y by
+summing the result of Lemma C.1 over the tokens
+yt. The expectation of the number of green list
+tokens, Ng, in y is at least
+E[NG] ≥αγNS.
+(6)
+where α =
+eδ
+1+(eδ−1)γ , and S = PN
+t=1 St/N.
+We can get the lower bound of the z-score by
+applying the z-score definition in Eq. 1:
+z ≥γ
+√
+N
+αS −1
+p
+γ(1 −γ)
+.
+(7)
+If the entropy threshold is applied, we consider
+only tokens with entropy values higher than the
+threshold to be tested. Let Nh be the number of
+tokens that have higher entropy values. Following
+Eq. 6 and Eq. 7 again with Nh, we can get the
+lower bound of the z-score of SWEET:
+z ≥γ
+√
+Nh αSh −1
+p
+γ(1 −γ)
+,
+where Sh = PN
+t=1 St × 1(St ≥τ)/N h.
+Method
+HumanEval
+pass@1
+AUROC
+TPR
+FPR
+Non-watermarked
+17.3
+-
+-
+-
+Non-watermarked (w/ high entropy)
+6.8
+-
+-
+-
+EXP-EDIT
+17.1
+0.612
+0.110
+<0.05
+EXP-EDIT (w/ high entropy)
+7.1
+0.844
+0.561
+<0.05
+WLLM (∆PASS@1 ∼−10%)⋆
+15.4
+0.777
+0.402
+<0.05
+SWEET (∆PASS@1 ∼−10%)⋆
+15.5
+0.921
+0.616
+<0.05
+WLLM (AUROC≥0.9)†
+9.2
+0.908
+0.720
+<0.05
+SWEET (AUROC≥0.9)†
+15.5
+0.921
+0.616
+<0.05
+Table 3: Results of code generation performance and
+detection ability in LLaMA2 13B. We calculate pass@1
+metrics by generating n = 40 examples. Hyperpa-
+rameters for decoding strategy is top-p decoding with
+p = 0.95 and temperature=0.1, except for baselines
+with high entropy; temperature=1.0 and top-p=1.0. We
+set the maximum length of the model generation to
+512. This table corresponds to the Table 1 version for
+LLaMA2, but only for watermark-based methods.
+Sh ≥S is ensured as we ignore all tokens with
+lower entropy than the threshold. By comparing
+Eq. 7 and Eq. 8,
+γ
+√
+Nh αSh −1
+p
+γ(1 −γ)
+≥γ
+√
+N
+αS −1
+p
+γ(1 −γ)
+,
+r
+N −Nl
+N
+≥αS −1
+αSh −1
+,
+Nl
+N ≤1 −( αS −1
+αSh −1
+)2,
+where Nl = N −Nh.
+D
+Implementation Details
+We have used three datasets for our testbeds: Hu-
+manEval, MBPP, and DS-1000. They have 164,
+500, and 1000 Python code problems, respectively.
+For our base models, StarCoder and LLaMA2, we
+use top-p (Holtzman et al., 2020) sampling with
+p = 0.95 for both models, and temperature 0.2
+and 0.1, respectively.
+When generating output
+for each code problems, we use zero-shot setting
+in HumanEval and DS-1000 but 3-shot in MBPP.
+Prompts used in MBPP are similar to the prompt
+in Austin et al. (2021). For calculating pass@1
+scores, we set n = 40 for HumanEval and DS-
+1000, and n = 20 for MBPP. We use a single
+NVIDIA RTX A6000 GPU to generate or detect
+each code completion with StarCoder or LLaMA2.
+It takes less than two GPU hours for generation and
+less than 1 GPU hour for detection.
+
+D.1
+DetectGPT
+We used two masking models for DetectGPT.
+When T5-3B is used for DetectGPT, we search
+hyperparameters for the length of the spans in
+[1,2,5,10] words, and for the proportion of masks
+in [5,10,15,20]% of the text. When utilizing San-
+taCoder, we simulate the single-line fill-in-the-
+middle task scenario by masking only one line of
+code per perturbation, which is a task that Santa-
+Coder is trained to perform well. (Fried et al., 2023;
+Bavarian et al., 2022). We search hyperparameters
+for the number line to be rephrased in [1,2,3,4].
+We make 100 perturbations following the original
+paper.
+D.2
+WLLM and SWEET
+Depending on the strength of watermark, trade-
+off between code functionality and watermarking
+detectability exists. We search hyperparameters
+for the ratio of the green list γ in [0.1,0.25,0.5],
+and for the green token promotion value δ in
+[0.5,1.0,2.0,3.0,4.0].
+For the entropy threshold
+values used in SWEET, we search thresholds in
+[0.3,0.6,0.9,1.2].
+D.3
+EXP-EDIT
+In most tasks we have conducted experiments, the
+length of the generated code hardly exceed 100
+tokens. Therefore, considering that length of the
+watermark key sequence significantly affected the
+detection speed, we search hyperparameters for the
+length of the key sequence only in [100, 500]. The
+block size was set equal to the length of the model
+output, and the resample size T = 500 for all in-
+stances. To generate n outputs to calculate pass@k,
+we shift the watermark key sequence randomly n
+times. Finally, we set edit distance hyperparameter
+γ = 0.0 for EXP-EDIT as used in their paper.
+E
+Experimental Details and Results on
+HumanEvalPack and ClassEval
+We choose two additional benchmarks to present
+how well our approach functions in broader soft-
+ware development contexts.
+E.1
+HumanEvalPack
+HumanEvalPack (Muennighoff et al., 2024) is an
+extension of HumanEval to cover 6 languages
+(Python, C++, Java, Javascript, Go, and Rust),
+and we choose C++ and Java as our testbeds. Ba-
+sically, all hyperparameter settings are equal to
+Python benchmarks except n = 5. For WLLM and
+SWEET, we narrow the search space for δ into
+[1.0,2.0,3.0,4.0]. For EXP-EDIT, we fix the length
+of the key sequence to 100.
+E.2
+ClassEval
+ClassEval (Du et al., 2023) differs from the afore-
+mentioned datasets in terms of code generation
+scopes as it requires language models to generate
+class-level code passages rather than just a single
+function. It consists of 100 class-level code genera-
+tion test examples in which a model has to generate
+a whole Python class code given a skeleton code of
+the class. Following the ClassEval paper, we use
+StarCoder-Instruct (GeorgiaTechResearchInstitute,
+2023) as the base model and the same instruction-
+following template of the prompt used in the paper.
+As the entropy distribution from StarCoder-Instruct
+skews to lower values than that of the StarCoder
+model, we search hyperparameters for threshold in
+[0.01,0.03,0.05,0.1,0.2] and δ in [2,3,4,5,10,15,20].
+We generate n = 5 outputs to calculate pass@5.
+For EXP-EDIT, due to the high computational cost,
+we make 50 perturbations instead of 100.
+E.3
+Results
+As presented in Table 2, SWEET outperforms all
+baselines in detecting machine-generated code in
+C++ and Java environments. Also, it still preserves
+code functionality much more than WLLM while
+achieving better detection performance. We ob-
+serve that the Pareto Frontier lines of SWEET are
+ahead of those of WLLM, as in the Python environ-
+ment (see Figure 7). It is worth noting that the C++
+and Java examples in HumenEvalPack comprise
+longer code than the Python examples we used in
+the paper: an average of 100 tokens for C++, 97 to-
+kens for Java, and 57 tokens for Python. Therefore,
+these results demonstrate that the efficacy of our
+methodology is not limited to the type of program-
+ming languages or the length of the code.
+In the class-level code generation task, we could
+still observe our approach showing the highest AU-
+ROC score than the baselines even in the class-level
+code generation task where the LLM should gen-
+erate longer and more complex code (the average
+token length of ClassEval solutions is 352). Specif-
+ically, SWEET achieves an AUROC of 0.980 with
+a 7.1% degradation of code functionality. Interest-
+ingly, as the text becomes longer, post-hoc meth-
+ods’ performance increases. On the other hand,
+EXP-EDIT has shown lower detection performance
+
+than when evaluated in StarCoder, even in the
+high-entropy setting, due to the extremely spiky
+entropy distribution of StarCoder-Instruct. In addi-
+tion, EXP-EDIT increases code functionality com-
+pared to non-watermarked baselines, even though
+it is a watermarking method that does not distort
+the original token distribution. We suppose these
+results are attributed to the specific watermark key
+sequence, which is randomly generated.
+F
+Further Pareto Frontier Results on
+StarCoder/LLaMA2
+HumanEval pass@100. Figure 9 shows a trade-
+off between pass@100 score and AUROC at Hu-
+manEval task in temperature 0.8. We generated
+200 samples in HumanEval to calculate pass@100.
+The tendency of the Pareto Frontier are the same,
+SWEET is consistently placed in the front. While
+pass@100 score is much higher than the pass@1
+score at temperature=0.2, we see the range of AU-
+ROC remains similar. This indicates temperature
+does not affect the detection strength of each sam-
+ples heavily.
+LLaMA2. Furthermore, Table 3 shows the re-
+sults on HumanEval when using LLaMA2 13B
+(a general-purpose LLM), as the backbone for
+code generation. We can observe similar trends as
+demonstrated in Figure 10. SWEET in LLaMA2
+achieves a higher AUROC than all other baselines
+while preserving code quality more than WLLM.
+Consequently, we observe that SWEET also ap-
+plies to general-purpose LLM, which is not code-
+specific.
+G
+Detectability with Varying Code
+Lengths
+We experiment the detection performance across
+different code lengths. Based on the detectabil-
+ity@T metric proposed in Kirchenbauer et al.
+(2023b), we evaluate the detection performance
+within the first T tokens of the machine-generated
+and human-written code sequences and calculate
+AUROC scores.
+As presented in Figure 11, SWEET demon-
+strates superior detection performance even in the
+short code texts. This is particularly important
+feature in code generation tasks comprised of rela-
+tively shorter texts than plain text generation. More-
+over, in HumanEval and MBPP, we can observe
+that the AUROC of SWEET reaches 1.0 with the
+text length exceeding 70, while none of the base-
+lines could achieve it.
+H
+Entropy Threshold Calibration
+This section proposes a method to calibrate the best
+entropy threshold effectively. To detect machine-
+generated texts, the z-score of them should be high.
+Let’s say there is a watermarked text sequence with
+an entropy threshold τ, and the length is N. The
+z-score is calculated as in Equation 1. Thus z ∝
+q
+Nh
+N ( Nh
+G
+Nh −γ), assuming a fixed N. If we can
+find a relationship between τ and Nh
+N , and τ and
+Nh
+G
+Nh , we could choose τ that maximizes the z-score
+in a fixed N. We denote z′ as a pseudo-metric for
+estimating z-score:
+z′ = E[Nh
+N ](E[Nh
+G
+Nh ] −γ)
+(8)
+With logits generated by an LLM, we can calcu-
+late entropy H and the probability of sampling a
+green token after adding δ to green tokens’ logits.
+We call the expectation of it over the randomness
+of green/red list partitioning as PG. We model the
+distribution of logits that LLM generates as a prob-
+ability distribution function P(H, PG; γ, δ). We
+approximate the tokens in a text sequence as i.i.d,
+then we can write as follows:
+E[Nh
+N ] = P(H > τ, PG)
+E[Nh
+G
+Nh ] = E[PG|H > τ]
+To estimate P(H, PG; γ, δ) in the Python lan-
+guage domain of StarCoder, we use a code corpus,
+CodeSearchNet (Husain et al., 2019). Specifically,
+we feed the Python corpus of CodeSearchNet to
+our model and obtain all logits for each time step
+and calculate H and PG. For PG, we averaged the
+probability of sampling a green token from a water-
+marked distribution with 500 random green/red list
+partitions. We regard the pair (H, PG) per one log-
+its as an unnormalized joint discrete distribution.
+The results are presented in Figure 12. The z′
+is the highest when the entropy threshold is in
+[0.820, 0.871]. It aligns with the results in Fig-
+ure 4, where the optimal threshold value lies around
+0.3∼0.9. Therefore, the threshold value found here
+is a good starting point for searching for the op-
+timal threshold value. The computational cost is
+only one forward pass across the corpus we used.
+
+Figure 6: The tradeoff between AUROC and pass@1 of detecting real and generated samples of HumanEval,
+MBPP, and DS1000 datasets. The pink line represents a Pareto frontier of SWEET, while the blue line represents
+that of WLLM. In all tasks and the entropy threshold configurations, SWEET shows consistent dominance. The
+red/orange line and circles are the points used in Table 1.
+Figure 7: The tradeoff between AUROC and pass@1 of detecting real and generated samples of C++ and Java of
+HumanEvalPack datasets. The pink line represents a Pareto frontier of SWEET, while the blue line represents
+that of WLLM. In all tasks and the entropy threshold configurations, SWEET shows consistent dominance. The
+red/orange line and circles are the points used in Table 2.
+The result indicates that we can use the information
+in the code corpus to calibrate an entropy threshold
+effectively.
+I
+Analysis of Computation Cost
+It is practically important to detect machine-
+generated text without a huge computational over-
+load. We here analyze computation costs for each
+baseline and our method.
+WLLM does not require any additional compu-
+tation as it only needs a random number generator
+and a seed number to put. On the other hand, all
+zero-shot post-hoc detection methods excluding
+DetectGPT need at least one forward pass of that
+LLM. DetectGPT needs to run forward passes as
+much as the number of perturbations for increased
+accuracy (the original paper generated 100 per-
+turbed samples, so we did the same). Our method
+needs one time forward pass to calculate the en-
+tropy, which is the same with zero-shot post-hoc
+detection methods except for DetectGPT. However,
+we demonstrated that our method outperforms base-
+lines even when utilizing a smaller surrogate model
+(Sec 6.3), indicating the capability of computation-
+ally more efficient employment. On the other hand,
+while EXP-EDIT does not need LLM for detecting
+watermarks, it requires measuring the Levenshtein
+distance to compute the test statistic. Specifically,
+it demands an extensive calculation of O(mnk2),
+where m be the length of the target text, n be the
+
+Figure 8: Effect of general prompts in SWEET in HumanEval. In this setting, the detector does not know what
+information would have been included in a prompt if the given sample source code had been model-generated.
+SWEET appends the sample to the fixed number of ‘general prompts’ that contain no information except for the
+format consistent with the answer. The purple line represents the Pareto frontier of the ‘General prompts’ version
+SWEET. Our approaches with general prompts still outperform WLLM in both code quality preservation and
+watermark detection, drawing the Pareto frontiers ahead of those of WLLM.
+Figure 9: The tradeoff between AUROC and pass@100 of detecting real and generated samples of HumanEval
+using temperature of 0.8 instead of 0.2 as other figures. We also generate n = 200 outputs for calculating pass@100
+scores. The pink line represents a Pareto frontier of SWEET, while the blue line represents a Pareto frontier of
+WLLM. We observe consistent improvement in SWEET.
+Figure 10: [LLaMa2 13B Results] The tradeoff between AUROC and pass@1 of detecting real and generated
+samples of HumanEval. The pink line represents a Pareto frontier of SWEET, while the blue line represents a
+Pareto frontier of WLLM. Additionally, we include the results of the SWEET with the surrogate model (purple
+line), in which a smaller LM is used to detect watermarks to save computational costs. Our approaches mostly draw
+Pareto frontiers ahead of those of WLLM, even with the surrogate model. The red/orange line and circles are the
+points used in Table 3.
+length of the watermark key sequence, and k be
+the block size. Moreover, T = 500 times of test
+statistic is also necessary for reporting the p-value.
+Although these computations do not require LLM
+and can be implemented in parallel, one can con-
+sider the computation cost of EXP-EDIT as high.
+
+Figure 11: Detectability@T (Kirchenbauer et al., 2023b) at HumanEval, MBPP, and DS-1000. We set γ = 0.25
+and δ = 3.0 for WLLM and SWEET. For EXP-EDIT, we use it with a high entropy setting. When calculating
+AUROC, we ensure at least 20 code texts of human-written solutions and machine-generated codes, respectively.
+We can observe that SWEET shows superior detection performance regardless of the text length in all tasks.
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+0.30
+0.35
+0.40
+0.45
+0.50
+0.55
+0.60
+0.65
+Figure 12: The relationship between the entropy thresh-
+old and the pseudo-metric for z-score, z′ in Eq. 8, calcu-
+lated based on CodeSearchNet dataset. The blue region
+[0.820, 0.871] is the best entropy threshold estimated by
+the calibration method described in Appendix H.
+J
+Analysis of Lexical Type Distributions
+Watermarking a text without degrading its quality
+is possible when many candidates are alternatively
+available. In code generation, it is challenging
+to achieve this, so SWEET selectively apply wa-
+termarking only on high entropy, i.e., when there
+are many candidates. Using Python built-in tok-
+enize module11, we here tokenize outputs of our
+SWEET method and analyze the distributions of
+lexical types both above and below the entropy
+threshold.
+11https://docs.python.org/3/library/tokenize.
+html
+J.1
+List of Lexical Types
+Below is the list of lexical types we use for
+analysis and corresponding examples.
+All list
+of types the tokenize module actually emits
+can be found in https://docs.python.org/3/
+library/token.html. We merged and split the
+original types.
+• NAME : identifier names, function names, etc.
+• OP : operators, such as {, [ ( +, =, etc.
+• INDENT : we merge NEWLINE, DEDENT,
+INDENT, NEWLINE, and NL.
+• RESERVED : split from NAME. In Python
+docs, they are officially named keywords.
+• BUILT-IN : split from NAME. Please refer to
+Python docs12.
+• NUMBER
+• STRING
+• COMMENT
+• FUNCNAME : split from NAME. We manu-
+ally build a list of function name almost be-
+ing used only for function. For examples, ap-
+pend(), join(), split() functions are included.
+J.2
+Lexical Types Distributions Above
+Threshold
+Figure 13 shows lexical types distributions of out-
+put tokens above the entropy threshold (i.e., wa-
+termarked tokens) across seven thresholds. As the
+12https://docs.python.org/3/library/functions.
+html#built-in-functions
+
+Figure 13: Distribution of lexical types of SWEET output on HumanEval task. We draw examples when γ = 0.25
+and δ = 3.0. The proportion of NAME type tokens increases the most while that of INDENT type tokens converges
+to zero.
+entropy threshold rises, the proportion of NAME
+type tokens increases by the most (26%p to 63%p).
+Intuitively, this can be easily understood, consid-
+ering there would be many alternative candidates
+for defining identifier names. Unfortunately, this
+would lead to vulnerability to an adversarial at-
+tack on watermarking, such as changing variable
+names. Following the NAME type, the ratio of
+the RESERVED type also increases slightly (12%p
+to 20%p), meaning that the model has multiple
+choices of logical flow in code generation, con-
+sidering RESERVED tokens usually decide code
+execution flow.
+J.3
+Lexical Types Distributions Below
+Threshold
+Figure 14 shows lexical types distributions of out-
+put tokens below the entropy threshold. In contrast
+to the distributions above the threshold, NAME and
+RESERVED types do not increase as the threshold
+rises. Meanwhile, the proportion of INDENT types
+slightly increases (18%p to 22%p), indicating that
+the model has more confidence in the rules, such
+as indentation.
+K
+Further Analysis of Breakdown of
+Post-hoc methods
+The performance of post-hoc detection methods in
+the machine-generated code detection task is sur-
+prisingly low compared to their performance in the
+plain text domain. In both HumanEval and MBPP,
+none of the post-hoc baselines have an AUROC
+score exceeding 0.6, and the TPR is around 10% or
+even lower. In this section, we analyze the failures
+of post-hoc detection baselines.
+Out-Of-Domain for classifiers. Methods lever-
+aging trained classifiers, such as GPTZero and
+OpenAI Classifier, inherently suffer from out-of-
+domain (OOD) issues (Guo et al., 2023; Yang et al.,
+2023). Since the machine-generated code detec-
+tion problems are relatively under explored, we
+can conjecture that there are not enough examples
+of machine-generated code for training, especially
+even though we do not know of the dataset on
+which GPTZero was trained.
+Relatively Short Length of Code Blocks. De-
+tectGPT presumes the length of the text being de-
+tected as near paragraph length. OpenAI Classifier
+released in 2023 (OpenAI, 2023b) takes only text
+longer than 1,000 tokens. Even in the WLLM and
+their following paper (Kirchenbauer et al., 2023b),
+the length is one of the prime factors in detec-
+tion and is used in a metric, detectability@T. De-
+spite the importance of the length, in our exper-
+iments, the length of the generated code text is
+generally short. The token lengths generated by
+the model were are 59 and 49 tokens on average
+for HumanEval and MBPP, respectively. Unless
+
+Figure 14: Distribution of lexical types of SWEET output on HumanEval task. We draw examples when γ = 0.25
+and δ = 3.0. In contrast to the distributions above the threshold, there is almost no distribution change.
+embedding some signals in the text intentionally,
+like WLLM and ours, it seems that it is challenging
+for post-hoc methods to detect short text.
+Failures in DetectGPT. Specifically, in Detect-
+GPT, we attribute the failure to detect machine-
+generated code to poor estimation of perturbation
+curvature. We hypothesize two reasons for this.
+Firstly, considering the nature of the code, it is
+challenging to rephrase a code while preserving its
+meaning or functionality. To minimize the degra-
+dation of perturbation, we use SantaCoder for the
+masking model and paraphrase only one line of
+code at a time. Yet, in most cases, the rephrased
+code is either identical to its original or broken in
+functionality. Secondly, LLMs have not achieved
+as satisfactory code generation performance as
+plain text generation. Hence, the base and masking
+models cannot draw meaningful curvature.

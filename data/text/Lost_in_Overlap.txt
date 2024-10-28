@@ -1,0 +1,3153 @@
+Lost in Overlap: Exploring Logit-based Watermark Collision in LLMs
+Yiyang Luo1*, Ke Lin2*, Chao Gu3*
+1 Nanyang Technological University
+2 Tsinghua University
+3 University of Science and Technology of China
+{lawrence.luoyy, leonard.keilin}@gmail.com, guch8017@mail.ustc.edu.cn
+Abstract
+The proliferation of large language models (LLMs) in gen-
+erating content raises concerns about text copyright. Water-
+marking methods, particularly logit-based approaches, em-
+bed imperceptible identifiers into text to address these chal-
+lenges. However, the widespread usage of watermarking
+across diverse LLMs has led to an inevitable issue known
+as watermark collision during common tasks, such as para-
+phrasing or translation. In this paper, we introduce watermark
+collision as a novel and general philosophy for watermark at-
+tacks, aimed at enhancing attack performance on top of any
+other attacking methods. We also provide a comprehensive
+demonstration that watermark collision poses a threat to all
+logit-based watermark algorithms, impacting not only spe-
+cific attack scenarios but also downstream applications.
+Introduction
+As the quality of text produced by large language mod-
+els (LLMs) advances, it addresses numerous practical chal-
+lenges while raising many new issues. In particular, the
+widespread generation of text by LLMs on the Internet
+may increase the spread of rumors and raise concerns about
+text copyright (Meg´ıas et al. 2021; Tang et al. 2023). Con-
+sequently, the identification and classification of machine-
+generated text have become critically significant. Water-
+marking techniques for LLMs can help to tackle these prob-
+lems, leading to their rising importance in ongoing conver-
+sations and attracting increasing interest globally.
+Text watermarking involves embedding distinctive, im-
+perceptible identifiers (watermarks) into written content.
+Nowadays, most methods are logit-based (Kirchenbauer
+et al. 2023a; Liu et al. 2023a; Zhao et al. 2023; Kuditipudi
+et al. 2023; Hu et al. 2023): they manipulate the output log-
+its of LLMs during the generation process using distinct but
+consistently logit-based strategies to embed watermarks suc-
+cessfully. Utilizing the power of LLMs ensures that such
+adjustings for probabilistic distribution are seamlessly in-
+tegrated into the generated content without compromising
+the overall quality or coherence of the text (Lin et al. 2024).
+These watermark methods are sophisticatedly designed to be
+*These authors contributed equally.
+Copyright © 2025. This is a manuscript for submission to Artificial
+Intelligence Conference. All rights reserved.
+Original Text
+Watermarked Text
+by Alice
+Watermarked Text
+by Alice & Bob
+Watermark
+Watermark
+Watermarked Text
+by Alice & Bob
+Detect
+Where's my
+watermark?
+Watermarking
+Detecting
+Alice
+Bob
+Figure 1: Illustration of watermark collisions.
+robust yet discreet, ensuring content integrity and ownership
+preservation without compromising readability or meaning.
+However, as watermarking techniques proliferate, water-
+mark collision becomes inevitable with the increasing appli-
+cation of watermarks. The term watermark collision can be
+defined as instances where the text contains multiple water-
+marks simultaneously (Fig. 1). This is particularly inevitable
+during tasks that may require the collaboration of multiple
+LLMs, such as paraphrasing and translation. While many
+methods (Liu et al. 2023a; Zhao et al. 2023; Kuditipudi et al.
+2023) claim resilience against paraphrase attacks, none have
+been specifically tested for watermark collisions. Hence,
+we examine the underlying mathematical principles, employ
+watermark collision as an attack strategy for all watermark-
+ing techniques that utilize logits, and evaluate its effective-
+ness in conjunction with multiple traditional attack methods
+enhanced through the incorporation of watermark collision.
+Our Contributions.
+In summary, this paper proposes a
+new watermark attack philosophy for all logit-based wa-
+termarks in LLMs. Our contributions are as follows:
+• We propose a novel philosophy for watermark attacks
+that can effectively remove existing watermarks from
+text. This approach can be integrated with various tra-
+ditional attack methods to enhance their performance.
+• We find that the strength of overlapping watermarks im-
+pacts detection performance. Upstream and downstream
+watermarks generally compete for detection accuracy,
+arXiv:2403.10020v2  [cs.CL]  14 Aug 2024
+
+with one being stronger and the other weaker.
+• We discuss the vulnerability of watermarking techniques
+caused by watermark collisions.
+Related Work
+Text watermarking.
+Modern text watermarking tech-
+niques can be classified into two categories: modification-
+based and generation-based watermarks (Liu et al. 2024).
+Modification-based watermarking, also known as water-
+marks for existing text, consists of altering an existing text
+to create a watermarked text. Most of the modification-based
+techniques can be classified as either lexical (Topkara, Top-
+kara, and Atallah 2006b; Yang et al. 2022; Munyer and
+Zhong 2023; Sato et al. 2023) or syntactic methods (Atal-
+lah et al. 2001; Topkara, Topkara, and Atallah 2006a; Meral
+et al. 2009), based on rules, classical machine learning or
+deep neural models.
+LLM watermarking.
+While modification-based tech-
+niques (Abdelnabi and Fritz 2020; Yang et al. 2022) modify
+the text and preserve its semantics, generation-based meth-
+ods apply watermarks into the text generation process to
+achieve better results, enabling smoother integration with
+LLMs. Watermark injection can be carried out during either
+the training phase or the inference phase.
+During the training of LLMs, watermarks are inserted into
+the training data to intentionally alter the results of LLMs for
+certain inputs (Liu et al. 2023b; Sun et al. 2022). The main
+objective of training time watermarking is to protect dataset
+copyrights from unauthorized usage (Tang et al. 2023; Sun
+et al. 2023). Despite being able to embed watermarks in
+LLMs, training-time watermarking has significant limita-
+tions, including limited payload capacity, restricted trigger
+conditions, and significant training overhead.
+For inference-time watermarking, Kirchenbauer et al.
+(2023a) proposed a logit-based greenlist mechanism based
+on prior token hashes. Liu et al. (2023a) introduced a water-
+mark model to generate semantic-preserving logits during
+text generation. Zhao et al. (2023) simplified the Kirchen-
+bauer et al.’s scheme by using a fixed Green-Red split
+and achieved greater robustness. Christ, Gunn, and Zamir
+(2023); Kuditipudi et al. (2023); Fu et al. (2024) aim to de-
+sign watermark techniques that are more robust and secure.
+Yoo, Ahn, and Kwak (2023); Boroujeny et al. (2024) intro-
+duce watermarking techniques with increased payload ca-
+pacity for arbitrary binary data. Zhu et al. (2024) enhances
+the efficiency and quality of watermarking by embedding
+dual secret patterns.
+Even though these methods have been designed to be
+more robust against attacks such as paraphrase attacks
+(Kirchenbauer et al. 2023b), back-translation attacks (He
+et al. 2024) and mask-and-fill attacks (Lyu, Huang, and
+Kong 2023), these attacks often use unwatermarked LLMs,
+e.g. DIPPER (Krishna et al. 2023) and GPT-3.5 (Brown et al.
+2020). Prior research in the pre-LLM era has mentioned
+potential risks associated with multiple watermarks (Tanha
+et al. 2012). Nevertheless, the effects of one watermarking
+technique on another in the context of LLM watermarking
+remain unclear, which is the motivation for this study.
+Method
+Principle of Watermark Collision
+The detection process for logit-based watermarking methods
+relies on the null hypothesis testing. A well-known example
+is the null hypothesis of KGW (Kirchenbauer et al. 2023a):
+H0 : The text sequence is generated with
+no knowledge of the red list rule.
+(1)
+Since the words of red list are chosen randomly, a natural
+writer is expected to sample words both from red and green
+list, whereas the watermarked model produces words only
+from green list. In practice, effective detection typically re-
+quires the text to contain sufficient words from a runtime-
+generated green list. This requirement ensures that the gen-
+erated text adheres to a specific probability distribution. The
+detection algorithm checks whether the distribution of words
+in the text conforms to the green-list distribution.
+Let P(T) represent the probability distribution of a cer-
+tain text T. The detection process verifies if P(T) follows
+the null hypothesis H0, which can be formulated as the fol-
+lows (δ(·) is the dirichlet function):
+δ[T is watermarked] =
+0
+P(T) ≈P(H0)
+1
+P(T) ̸≈P(H0)
+(2)
+From a probabilistic perspective, a watermark w can
+be detected only when text T follows a watermarked dis-
+tribution Pw. However, each watermarking method has
+an independent null hypothesis H0 and therefore cre-
+ates different word distributions in the generation pro-
+cess. When an additional watermark w′ is applied, it im-
+poses a new distribution Pw′ on the text. If more wa-
+termarks are added, a series of distributions are obtained:
+(Pw(0), Pw(1), Pw(2), . . . , Pw(n)), where Pw(0) = Pw. In-
+troducing each new watermark modifies the word probabil-
+ities in T, thus altering the overall distribution. Specifically,
+any distinct watermarks w(i) and w(j) should have differ-
+ent distributions Pw(i) and Pw(j) to ensure that they are not
+incorrectly detected by each other. As a result, the text T
+no longer strictly follows the original distribution P(T), nor
+does it fully conform to any of the subsequent distributions
+Pw(0), Pw(1), Pw(2), . . . , Pw(n). Therefore, the combination
+of multiple watermarks can be described as a transformation
+of the original watermark into an entangled one:
+Pentangled = f(Pw(0), Pw(1), Pw(2), . . . , Pw(n))
+(3)
+Here, f represents the complex transformation function re-
+sulting from the sequential application of multiple water-
+marks. This new distribution Pentangled is not merely a sim-
+ple combination but a new complex distribution that emerges
+from the (indirect) interaction of all applied watermarks.
+Since the detection process relies on identifying patterns
+consistent with Pw(i), the introduction of Pentangled causes
+the final text distribution to no longer conform to any of
+these patterns. The detection algorithm may not be able to
+detect the watermark in the text due to a shift in word distri-
+bution from Pw(i), leading to watermark collisions.
+
+"I love apple juice"
+Watermarker
+Paraphraser w/o WM.
+Paraphraser w/ WM.
+"I liked apple beverage"
+"I love apple drink"
+Paraphrasing
+Translator w/ WM.
+"J'aime le jus de pomme"
+"I loved apple beverage"
+Back-translation
+Translator w/o WM.
+"J'adore le jus de pomme"
+"I love apple juice"
+MnF w/ WM.
+"I love apple [MASK]"
+"I love apple beverage"
+Mask-and-fill
+MnF w/o WM.
+"I love apple [MASK]"
+"I love apple drink"
+"I like apple juice"
+LLM w/o WM.
+Detector of Watermark
+Detector of Watermark
+Detector of Watermark
+Detector of Watermark
+Figure 2: The collision pipeline. TW denotes text with the first watermark W, where TC denotes text with dual watermarks from
+a different collider C ∈{P, R, M}. Unwatermarked text generated from W and C is denoted as TW ′ and TC′. TC and TC′
+are then examined by DW and DC to determine the presence of watermark W and C. Texts in red and green are visualization
+samples of the red-green list showing the original watermark W.
+Pipeline Design
+To prove the existence of watermark collisions, we design
+pipelines with three main components: watermarker, collid-
+ers, and detectors.
+Watermarker
+Watermarker W generates watermarked
+texts TW by using a language model (LM) to create con-
+tent based on a specific corpus as context. As illustrated in
+Fig. 2, we first produce the watermarked text data TW with
+Watermarker W. Additionally, we generate unwatermarked
+text TW ′ using the same context and prompt as TW for fur-
+ther comparisons. Experiments Section and Appendix pro-
+vide details regarding the watermarker setup.
+Colliders
+Colliders C are designed to attack the water-
+mark created by the watermarker using collision techniques.
+There are three distinct colliders that apply such collision
+attacks through traditional attack methods, namely para-
+phraser, back-translator, and mask-and-filler.
+Paraphrase Collider.
+Paraphraser P rephrases the water-
+marked texts TW with different watermarks, i.e. generated
+by different methods or keys, to generate paraphrased text
+data TP , which are intended to contain dual watermarks si-
+multaneously. Furthermore, we also generate texts T ′
+P using
+the same paraphraser but without a watermark, denoted as
+P ′, for further comparison.
+Back-translation Collider.
+Translator R translates the
+watermarked texts TW to other languages and then translates
+back to their original language with watermarks. As shown
+in Fig. 2, we first paraphrase the original text data TW using
+Watermarker W. Then the text data will be translated and
+back-translated by Translator R with different watermark
+settings to generate text data TR which are intended to con-
+tain dual watermarks simultaneously. Furthermore, we also
+generate texts T ′
+R using the same translator but without a
+watermark, denoted as R′, for further comparison.
+It is important to note that the KGW-based method is es-
+sentially ineffective against back-translation attacks due to
+the incapability of capturing the contextual semantics. Thus,
+they have been excluded from this pipeline. We choose
+French as the pivot language in the back-translation. Details
+are in Experiments Section.
+Mask-and-fill Colliders.
+Mask-and-filler (MnF) M is
+specifically designed for mask-and-fill attacks. The MnF at-
+tack method is commonly used with masked language mod-
+els, e.g., BERT-based models. For our study, we opted for
+RoBERTaLARGE as the base model. As shown in Fig. 2, we
+first generate watermarked text data TW using Watermarker
+W. Then the text data will be mask-and-filled by MnF M
+with different watermark settings to generate text data TM
+which are intended to contain dual watermarks simultane-
+ously. Additionally, we create texts T ′
+M by applying the
+same MnF but excluding the watermark, denoted as M ′.
+
+These will be used as baseline texts for comparison.
+Detectors
+As demonstrated in Fig.2, there are four detec-
+tors, each tailored to identify a specific type of watermark.
+Detector DP targets watermarks in paraphrasers, DR fo-
+cuses on those in translators, and DM is for watermarks in
+the MnF process. Detector DW aims to identify the original
+watermark embedded by the watermarker. By comparing the
+results from these detectors, we can assess the effectiveness
+of the attacks with or without additional watermarks.
+Experiments
+Experiment Setup
+Settings.
+We utilize the C4 dataset (Raffel et al. 2020) as
+the context for text generation with a maximum of 128 to-
+kens. For watermarker and paraphraser, we employ LLaMA-
+2-13B (Touvron et al. 2023), Qwen2-7B (Bai et al. 2023)
+and OPT-1.3B (Zhang et al. 2022). For back-translator,
+we use LLaMA-2-13B and Qwen2-7B. For mask-and-filler,
+we exclusively utilize RoBERTaLARGE (Liu et al. 2019) as
+the masked language model. We only present results of
+LLaMA-2-13B here and refer to the Appendix for more de-
+tails of the experiments.
+Watermarks.
+Our experiments were conducted using sev-
+eral previous watermark methods as baselines. The wa-
+termark strength of each method is tuned separately for
+weak and strong watermarks. Methods involved include:
+(a) KGW from Kirchenbauer et al. (2023a), d = 2, 5 for
+weak and strong settings; (b) PRW from Zhao et al. (2023),
+s = 2, 5 for weak and strong settings. (c) SIR from Liu et al.
+(2023a), d = 2, 5 for weak and strong settings; Note that we
+use subscript ·wk and ·sg to refer to weak and strong water-
+marks, respectively.
+Some methods are not selected for specific reasons. UBW
+from Hu et al. (2023) asserting that their approach lacks re-
+silience against paraphrase attacks, thereby rendering it un-
+suitable for this experiment. RDW from Kuditipudi et al.
+(2023) may be ineffective when subjected to a key differ-
+ent from their recommended configuration, thereby failing
+to meet the experimental requirements that necessitate dis-
+tinct key settings.
+Evaluation Metrics
+Given the rapid development of the watermarking field,
+there is currently no consensus on metrics, with dif-
+ferent methods employing varied evaluation criteria (Tu
+et al. 2023). Moreover, some approaches utilize a detection
+threshold to categorize text as watermarked, while others
+differ. Implementing all possible metrics for each method
+is impractical and biased.
+Following the approach of Zhao et al. (2023), we opt for
+a fair evaluation by avoiding the influence of threshold set-
+tings. Our final detection metrics include false positive rates
+(FPR) and true positive rates (TPR). We specifically set
+FPR values at 1%, 5%, and 10%, adjusting the detector’s
+thresholds accordingly. This ensures a consistent and unbi-
+ased assessment of watermarking methods. We only present
+results when FPR = 1% here and refer to Appendix for com-
+prehensive results.
+Experimental Results & Analysis
+Watermark collision is compatible with the majority of
+existing attacks.
+Tables 1, 2, and 5 demonstrate that wa-
+termark collision is feasible for all selected attacks, includ-
+ing paraphrase, back-translation, and mask-and-fill attacks.
+Watermark collision is commonly found in attacks involv-
+ing auto-regressive text generation methods such as para-
+phrasing and back-translation. Mask-and-fill attacks are in-
+effective as they cannot completely change the distribution
+of words in a sentence.
+Watermark collision will not degrade the text quality.
+As shown in Tab. 3 and 4, we present perplexity before
+and after attacks, both with and without collisions. We use
+LLaMA-2-13B as the backbone for perplexity calculation,
+which is the same model for the initial generated text. As
+evidence, the text quality remains largely stable post-attack,
+and most collisions did not result in significant declines in
+text quality, indicating the potential value of collision as a
+methodology of attack.
+Watermark attacks with watermarks collision tend to be
+stronger than those without.
+In Table 1 and 2, we present
+the detection accuracy for various baseline watermark algo-
+rithms with and without the occurrence of watermark col-
+lision (TP and T ′
+P , respectively). A noteworthy decline in
+detection accuracy is observed when watermarks are intro-
+duced in the context of traditional attacks such as paraphrase
+attacks and back-translation attacks. According to the set-
+tings in Table 1 and 2, there is a strong competition between
+overlapping watermarks. As one watermarker attempts to
+maintain its detection accuracy, the others’ detection accu-
+racy decreases. SIR-SIR is not listed since the SIR does not
+allow the user to choose a key to create a different distribu-
+tion, and therefore the watermark collision will not occur on
+SIR-SIR. However, SIR watermarks are still vulnerable to
+collision attacks using other watermark methods.
+It should also be noted that different watermarking meth-
+ods behave differently during competition. KGW appears to
+be less competent than the other two methods. SIR, how-
+ever, shows significant collisions even in weak paraphraser
+settings (Column SIR of Tab. 1a & 1c), while PRW exhibits
+extreme collisions in strong paraphraser settings (Column
+PRW of Tab. 1b & 1d).
+However, some anomalies can be observed in back-
+translation (Table 2), where the TPR increases after a col-
+lision. These anomalies occur because certain watermarks
+may have similar distributions in specific contexts, render-
+ing them ineffective and making attacks on them pointless:
+When two watermark methods exhibit similar distributions,
+the likelihood of collision decreases, leading to an increase
+in the True Positive Rate (TPR). For example, if two KGW-
+based watermark methods utilize the a similar but not the
+same red-green list, paraphrasing words into other similar
+words may accidentally reinforce the watermark within the
+text, thereby enhancing the TPR. But this is a degraded per-
+formance for a certain watermark method: It is a challenge
+
+W
+P
+∅
+P ′
+KGWwk
+PRWwk
+SIRwk
+DW
+DW
+DW
+DP
+DW
+DP
+DW
+DP
+KGWwk
+99.90
+71.65
+52.80
+19.80
+41.10
+48.00
+3.40
+90.09
+PRWwk
+95.40
+49.25
+37.00
+28.20
+26.60
+41.20
+22.30
+79.56
+SIRwk
+87.90
+59.05
+55.74
+25.10
+41.05
+19.80
+/
+/
+(a) weak W, weak P
+W
+P
+∅
+P ′
+KGWwk
+PRWwk
+SIRwk
+DW
+DW
+DW
+DP
+DW
+DP
+DW
+DP
+KGWwk
+99.90
+71.65
+4.10
+97.40
+6.20
+99.90
+0.20
+92.77
+PRWwk
+95.40
+49.25
+14.60
+96.70
+9.30
+99.90
+29.40
+91.91
+SIRwk
+87.90
+59.05
+12.45
+96.70
+13.22
+97.50
+/
+/
+(b) weak W, strong P
+W
+P
+∅
+P ′
+KGWwk
+PRWwk
+SIRwk
+DW
+DW
+DW
+DP
+DW
+DP
+DW
+DP
+KGWsg
+100.00
+81.95
+68.20
+21.50
+56.00
+44.40
+9.00
+79.26
+PRWsg
+99.70
+75.05
+67.90
+18.30
+44.20
+41.70
+32.00
+65.31
+SIRsg
+94.30
+67.60
+61.55
+21.00
+45.58
+14.00
+/
+/
+(c) strong W, weak P
+W
+P
+∅
+P ′
+KGWwk
+PRWwk
+SIRwk
+DW
+DW
+DW
+DP
+DW
+DP
+DW
+DP
+KGWsg
+100.00
+81.95
+7.00
+94.10
+14.80
+99.70
+0.80
+90.52
+PRWsg
+99.70
+75.05
+14.60
+96.70
+11.20
+99.30
+37.10
+79.00
+SIRsg
+94.30
+67.60
+10.98
+97.40
+12.58
+97.10
+/
+/
+(d) strong W, strong P
+Table 1: TPR of the paraphrased text TP with dual watermarks when FPR = 1%. W and P represent the watermarker
+and paraphraser, respectively. DW and DP represent the detector of the watermarker and paraphraser. ∅indicates that no
+paraphrasing process is applied to the text, and its corresponding column represents the result of using DW to detect watermark
+W in TW . P ′ represents paraphrasing TW without watermark, as mentioned in Fig. 2.
+W
+R
+∅
+R′
+KGWwk
+PRWwk
+SIRwk
+DW
+DW
+DW
+DR
+DW
+DR
+DW
+DR
+KGWwk
+99.90
+44.80
+41.90
+9.20
+34.20
+13.70
+31.40
+5.15
+PRWwk
+95.40
+32.90
+34.10
+7.50
+21.80
+12.70
+25.20
+5.73
+SIRwk
+87.90
+5.60
+4.75
+7.70
+6.12
+11.50
+/
+/
+(a) weak W, weak R
+W
+R
+∅
+R′
+KGWwk
+PRWwk
+SIRwk
+DW
+DW
+DW
+DR
+DW
+DR
+DW
+DR
+KGWwk
+99.90
+44.80
+28.50
+69.50
+18.50
+58.50
+3.90
+93.50
+PRWwk
+95.40
+32.90
+23.00
+68.00
+14.30
+54.60
+10.80
+92.87
+SIRwk
+87.90
+5.60
+4.28
+67.40
+4.40
+41.60
+/
+/
+(b) weak W, strong R
+W
+R
+∅
+R′
+KGWwk
+PRWwk
+SIRwk
+DW
+DW
+DW
+DR
+DW
+DR
+DW
+DR
+KGWsg
+100.00
+69.30
+67.80
+8.10
+61.90
+13.60
+55.30
+4.09
+PRWsg
+99.70
+63.90
+64.80
+9.60
+55.20
+10.20
+50.60
+3.56
+SIRsg
+94.30
+3.00
+1.74
+9.40
+3.82
+6.70
+/
+/
+(c) strong W, weak R
+W
+R
+∅
+R′
+KGWwk
+PRWwk
+SIRwk
+DW
+DW
+DW
+DR
+DW
+DR
+DW
+DR
+KGWsg
+100.00
+69.30
+50.00
+68.90
+38.80
+53.00
+7.50
+91.70
+PRWsg
+99.70
+63.90
+50.10
+67.90
+36.60
+42.40
+20.10
+90.44
+SIRsg
+94.30
+3.00
+4.15
+74.40
+2.51
+22.50
+/
+/
+(d) strong W, strong R
+Table 2: TPR of the back-translated text TR with dual watermarks when FPR = 1%. Similar to Table 1. Data annotated with
+underline indicate abnormal data points.
+to identify the originating method of the watermark. In prac-
+tical scenarios, if the origin of the watermark cannot be de-
+termined, it essentially means we cannot ascertain which en-
+tity embedded the watermark. Consequently, such cases are
+considered failures of specific watermark methods and do
+not concern us.
+MnF exhibits a similar trend as the watermark collision
+intensifies, however, it experiences less impact compared
+to other colliders.
+We note that attacks on MnF are less
+effective because the unmasked words retain most of the
+context and keep the watermark unaltered. Therefore, the
+TPR in these cases remains nearly the same. Nonetheless,
+it is observed that when considering the z-score of H0 as
+stated in (Kirchenbauer et al. 2023a), the influence of water-
+mark collision persists.
+In Table 5, we present the z-scores for each correspond-
+ing method. Degradation of the z-score is observed after col-
+lision attacks compared to those without, indicating the ef-
+fectiveness of collisions. Besides, the mask rate has a greater
+impact on the detection process. If the mask rate is low, MnF
+is less likely to have a significant effect, thus explaining why
+these attacks have minimal impact on MnF. Furthermore, the
+SIR method is excluded from MnF experiments, as it priori-
+tizes semantic factors and is less susceptible to MnF attacks.
+Multi-round Collision
+To further enhance the performance of these attacks, multi-
+round collisions can be applied. We tested the performance
+of multi-round attacks both with and without watermark col-
+lisions, and the results are presented in Fig. 3. In each exper-
+iment, we use the same paraphraser to assess the chain ef-
+fect caused by watermark collisions. For various watermark
+methods, the TPR of each watermark detection decreases af-
+ter multi-round collision attacks. As explained in the previ-
+ous section, applying multi-round collisions causes the word
+distribution to deviate more significantly from subsequent
+distributions. The stronger the watermark, the less likely it
+is for the multi-round watermark to coexist with others.
+
+W
+P
+∅
+P ′
+KGWwk
+PRWwk
+SIRwk
+KGWwk
+7.36
+6.96
+8.60
+6.58
+12.28
+PRWwk
+6.92
+6.69
+9.77
+6.24
+12.15
+SIRwk
+10.14
+7.15
+11.04
+7.09
+/
+(a) weak W, weak R
+W
+P
+∅
+P ′
+KGWsg
+PRWsg
+SIRsg
+KGWwk
+7.36
+6.96
+15.67
+5.05
+14.08
+PRWwk
+6.92
+6.69
+13.85
+5.22
+10.25
+SIRwk
+10.14
+7.15
+13.31
+5.12
+/
+(b) weak W, strong R
+W
+P
+∅
+P ′
+KGWwk
+PRWwk
+SIRwk
+KGWsg
+13.18
+7.44
+14.16
+8.39
+13.55
+PRWsg
+8.31
+7.61
+10.53
+6.54
+12.00
+SIRsg
+12.30
+7.72
+12.75
+7.80
+/
+(c) strong W, weak R
+W
+P
+∅
+P ′
+KGWsg
+PRWsg
+SIRsg
+KGWsg
+13.18
+7.44
+12.80
+5.60
+12.03
+PRWsg
+8.31
+7.61
+11.15
+4.91
+9.22
+SIRsg
+12.30
+7.72
+11.29
+4.99
+/
+(d) strong W, strong R
+Table 3: PPL of the paraphrased TP with dual WMs.
+Possible Application
+Interference with downstream tasks caused by water-
+mark collisions.
+Since LLM watermarks may be used in
+a variety of downstream applications, particularly in QA
+scenarios, collisions between watermarks may cause greater
+damage to downstream watermarks. Texts with watermarks
+are more likely to be used as user input or dialogue context.
+As a result, LLM service providers may have difficulty wa-
+termarking their output. This may occur more frequently and
+harm the development of LLM watermarking techniques.
+Malicious attacks based on watermark collisions.
+Pre-
+vious works (Kirchenbauer et al. 2023b,a; Kuditipudi et al.
+2023) have introduced several attacks, such as copy-paste
+attacks and paraphrase attacks, but most have shown their
+robustness and security against at least some of these at-
+tacks. Our study, however, provides a feasible method of
+constructing effective attacks using watermark collisions.
+For example, text with a KGWwk watermark can be detected
+with a 44.8% TPR after a paraphrase attack without a water-
+mark. However, if the paraphrase attack is conducted with
+another KGWwk, the detection TPR drops to 41.9%. If the
+attack is done with a KGWsg, the detection TPR further de-
+creases to 28.5%, as presented in Table 1a and 1b. The use
+W
+P
+∅
+P ′
+KGWwk
+PRWwk
+SIRwk
+KGWwk
+7.36
+8.82
+9.00
+8.29
+10.16
+PRWwk
+6.92
+8.21
+8.52
+8.02
+9.39
+SIRwk
+10.14
+9.82
+10.37
+9.14
+/
+(a) weak W, weak R
+W
+P
+∅
+P ′
+KGWsg
+PRWsg
+SIRsg
+KGWwk
+7.36
+8.82
+11.86
+9.63
+33.35
+PRWwk
+6.92
+8.21
+11.15
+8.84
+30.57
+SIRwk
+10.14
+9.82
+13.39
+9.92
+/
+(b) weak W, strong R
+W
+P
+∅
+P ′
+KGWwk
+PRWwk
+SIRwk
+KGWsg
+13.18
+12.74
+12.88
+11.41
+14.91
+PRWsg
+8.31
+9.02
+9.29
+8.33
+11.11
+SIRsg
+12.30
+10.05
+10.91
+8.72
+/
+(c) strong W, weak R
+W
+P
+∅
+P ′
+KGWsg
+PRWsg
+SIRsg
+KGWsg
+13.18
+12.74
+17.58
+11.83
+36.84
+PRWsg
+8.31
+9.02
+12.59
+9.60
+27.98
+SIRsg
+12.30
+10.05
+14.78
+9.18
+/
+(d) strong W, strong R
+Table 4: PPL of the back-translated TP with dual WMs.
+of paraphrase, back-translation, and mask-and-fill colliders
+with strong watermarks could easily wipe out existing wa-
+termarks, resulting in greater vulnerability to watermarking.
+Detection of existing watermarks using collisions be-
+tween watermarks of different strengths.
+In Table 1 and
+2, we demonstrate that weak watermarks can still be easily
+applied to unwatermarked text. It is, however, much more
+difficult to apply a weak watermark to text that has already
+been watermarked (Tab. 1 & 2). For example, KGW can be
+applied to plaintext with a success rate of 99.90%, but can
+be applied to a SIR-watermarked text with a probability not
+exceeding 25.10%, as presented in Table 1a and 1c. This pro-
+vides a simple probabilistic method of detecting watermarks
+without the need to know their details. When it is difficult to
+add a weak watermark to a paraphrased sentence, it is more
+likely to have an existing watermark in the original sentence.
+Discussion
+The LLM watermarking technique is currently undergoing
+rapid development, with many foundational aspects not yet
+implemented for practical use regularly. However, our re-
+search demonstrates that when watermarks collide, it can
+significantly hinder the performance of the watermark when
+
+∅
+P(0)
+P(1)
+P(2)
+Rounds of Paraphrasing
+0
+20
+40
+60
+80
+100
+TPR (%)
+DW
+DP(0)
+DP(1)
+DP(2)
+(a) P = KGWwk
+∅
+P(0)
+P(1)
+P(2)
+Rounds of Paraphrasing
+0
+20
+40
+60
+80
+100
+TPR (%)
+DW
+DP(0)
+DP(1)
+DP(2)
+(b) P = PRWwk
+∅
+P(0)
+P(1)
+P(2)
+Rounds of Paraphrasing
+0
+20
+40
+60
+80
+100
+TPR (%)
+DW
+DP(0)
+DP(1)
+DP(2)
+(c) P = KGWsg
+∅
+P(0)
+P(1)
+P(2)
+Rounds of Paraphrasing
+0
+20
+40
+60
+80
+100
+TPR (%)
+DW
+DP(0)
+DP(1)
+DP(2)
+(d) P = PRWsg
+Figure 3: Multi-round TPR of paraphrased text under a series of paraphrase attacks by the same type of paraphraser
+with different watermarks. ∅represents the original detection TPR before paraphrasing. A sequence of paraphrasers
+(P (0), P (1), P (2), . . . ) is applied consecutively to the generated text from the preceding paraphraser.
+W
+M
+∅
+KGWwk
+PRWwk
+KGWsg
+PRWsg
+KGWwk
+4.14±1.57
+3.88±1.51
+3.62±1.52
+3.52±1.51
+3.42±1.56
+PRWwk
+5.14±1.51
+4.89±1.52
+4.64±1.59
+4.35±1.60
+4.44±1.57
+KGWsg
+6.72±1.95
+6.37±1.95
+6.09±1.99
+5.97±1.87
+5.86±1.95
+PRWsg
+7.82±1.70
+7.62±1.74
+7.35±1.81
+7.08±1.87
+7.07±1.82
+Table 5: Z-scores of the mask-and-filled text TM with dual
+watermarks with a mask rate of 0.6 for masked language
+modeling tasks. ∅means no MnF is applied, i.e., the original
+detection results of z-scores.
+applied in real-world situations. A list of predictable risks in
+practical applications is provided:
+• API Tracing: LLM providers can use watermarking
+techniques on their LLM API to prevent unauthorized
+use. However, if the watermarked output of LLMs is sent
+to other providers with watermarks for further process-
+ing, the upstream watermarks will not be effective in trac-
+ing the use of the upstream APIs.
+• Black-box Detection: As we discussed in the Experi-
+ments Section, the watermark collisions could be used to
+perform black-box detection of any existing watermarks
+in any text. Users would experience distrust when they
+become aware of the presence of watermarks. Hackers
+may attempt to bypass the watermarks.
+Conclusion
+In this study, we examine how overlapping watermarks in
+the same text can decrease the accuracy of both upstream
+and downstream watermark detection. We propose the use
+of watermark collisions as an attacking philosophy and
+therefore emphasize that watermark collisions may compro-
+mise the validity and security of all logit-based watermarks.
+We conduct experiments by integrating various watermark-
+ers and colliders, assessing the text quality before and after
+collisions, as well as with and without collisions. Our results
+demonstrate that collision can enhance common attacks and
+text quality remains consistent when compared to attacks
+without collisions. While we do not aim to solve the issue of
+watermark collisions, we hope our work will increase aware-
+ness of potential threats to LLM watermarking.
+
+References
+Abdelnabi, S.; and Fritz, M. 2020. Adversarial Watermark-
+ing Transformer: Towards Tracing Text Provenance with
+Data Hiding. 2021 IEEE Symposium on Security and Pri-
+vacy (SP), 121–140.
+Atallah, M. J.; Raskin, V.; Crogan, M.; Hempelmann, C.;
+Kerschbaum, F.; Mohamed, D.; and Naik, S. 2001. Natu-
+ral language watermarking: Design, analysis, and a proof-
+of-concept implementation. In Information Hiding: 4th In-
+ternational Workshop, IH 2001 Pittsburgh, PA, USA, April
+25–27, 2001 Proceedings 4, 185–200. Springer.
+Bai, J.; Bai, S.; Chu, Y.; Cui, Z.; Dang, K.; Deng, X.; Fan,
+Y.; Ge, W.; Han, Y.; Huang, F.; et al. 2023. Qwen Technical
+Report. arXiv preprint arXiv:2309.16609.
+Boroujeny, M. K.; Jiang, Y.; Zeng, K.; and Mark, B. 2024.
+Multi-Bit Distortion-Free Watermarking for Large Lan-
+guage Models. arXiv preprint arXiv:2402.16578.
+Brown, T.; Mann, B.; Ryder, N.; Subbiah, M.; Kaplan, J. D.;
+Dhariwal, P.; Neelakantan, A.; Shyam, P.; Sastry, G.; Askell,
+A.; et al. 2020. Language models are few-shot learners. Ad-
+vances in neural information processing systems, 33: 1877–
+1901.
+Christ, M.; Gunn, S.; and Zamir, O. 2023.
+Unde-
+tectable Watermarks for Language Models. arXiv preprint
+arXiv:2306.09194.
+Fu, J.; Zhao, X.; Yang, R.; Zhang, Y.; Chen, J.; and
+Xiao, Y. 2024. GumbelSoft: Diversified Language Model
+Watermarking via the GumbelMax-trick.
+arXiv preprint
+arXiv:2402.12948.
+He, Z.; Zhou, B.; Hao, H.; Liu, A.; Wang, X.; Tu, Z.;
+Zhang, Z.; and Wang, R. 2024.
+Can Watermarks Sur-
+vive Translation? On the Cross-lingual Consistency of Text
+Watermark for Large Language Models.
+arXiv preprint
+arXiv:2402.14007.
+Hu, Z.; Chen, L.; Wu, X.; Wu, Y.; Zhang, H.; and Huang,
+H. 2023. Unbiased watermark for large language models.
+arXiv preprint arXiv:2310.10669.
+Kirchenbauer, J.; Geiping, J.; Wen, Y.; Katz, J.; Miers, I.;
+and Goldstein, T. 2023a.
+A Watermark for Large Lan-
+guage Models. In Krause, A.; Brunskill, E.; Cho, K.; En-
+gelhardt, B.; Sabato, S.; and Scarlett, J., eds., Proc. 40th Int.
+Conf. Mach. Learn., volume 202 of Proc. Mach. Learn. Res.,
+17061–17084. PMLR.
+Kirchenbauer, J.; Geiping, J.; Wen, Y.; Shu, M.; Saifullah,
+K.; Kong, K.; Fernando, K.; Saha, A.; Goldblum, M.; and
+Goldstein, T. 2023b. On the Reliability of Watermarks for
+Large Language Models. arXiv preprint arXiv:2306.04634.
+Krishna, K.; Song, Y.; Karpinska, M.; Wieting, J.; and Iyyer,
+M. 2023.
+Paraphrasing evades detectors of ai-generated
+text, but retrieval is an effective defense.
+arXiv preprint
+arXiv:2303.13408.
+Kuditipudi, R.; Thickstun, J.; Hashimoto, T.; and Liang, P.
+2023. Robust distortion-free watermarks for language mod-
+els. arXiv preprint arXiv:2307.15593.
+Lin, K.; Luo, Y.; Zhang, Z.; and Ping, L. 2024. Zero-shot
+Generative Linguistic Steganography. In Duh, K.; Gomez,
+H.; and Bethard, S., eds., Proceedings of the 2024 Confer-
+ence of the North American Chapter of the Association for
+Computational Linguistics: Human Language Technologies
+(Volume 1: Long Papers), 5168–5182. Mexico City, Mexico:
+Association for Computational Linguistics.
+Liu, A.; Pan, L.; Hu, X.; Meng, S.; and Wen, L. 2023a. A
+Semantic Invariant Robust Watermark for Large Language
+Models. arXiv preprint arXiv:2310.06356.
+Liu, A.; Pan, L.; Lu, Y.; Li, J.; Hu, X.; Zhang, X.; Wen, L.;
+King, I.; Xiong, H.; and Yu, P. S. 2024. A Survey of Text
+Watermarking in the Era of Large Language Models. arXiv
+preprint arXiv:2312.07913.
+Liu, Y.; Hu, H.; Zhang, X.; and Sun, L. 2023b. Watermark-
+ing text data on large language models for dataset copyright
+protection. arXiv preprint arXiv:2305.13257.
+Liu, Y.; Ott, M.; Goyal, N.; Du, J.; Joshi, M.; Chen, D.;
+Levy, O.; Lewis, M.; Zettlemoyer, L.; and Stoyanov, V.
+2019. Roberta: A robustly optimized bert pretraining ap-
+proach. arXiv preprint arXiv:1907.11692.
+Lyu, M.; Huang, Y.; and Kong, A. W.-K. 2023. Adversarial
+Attack for Robust Watermark Protection Against Inpainting-
+based and Blind Watermark Removers.
+In Proceedings
+of the 31st ACM International Conference on Multimedia,
+8396–8405.
+Meg´ıas, D.; Kuribayashi, M.; Rosales, A.; and Mazurczyk,
+W. 2021. DISSIMILAR: Towards fake news detection using
+information hiding, signal processing and machine learn-
+ing. In Proceedings of the 16th International Conference
+on Availability, Reliability and Security, 1–9.
+Meral, H. M.; Sankur, B.; ¨Ozsoy, A. S.; G¨ung¨or, T.; and
+Sevinc¸, E. 2009. Natural language watermarking via mor-
+phosyntactic alterations.
+Computer Speech & Language,
+23(1): 107–125.
+Munyer, T.; and Zhong, X. 2023. Deeptextmark: Deep learn-
+ing based text watermarking for detection of large language
+model generated text. arXiv preprint arXiv:2305.05773.
+Raffel, C.; Shazeer, N.; Roberts, A.; Lee, K.; Narang, S.;
+Matena, M.; Zhou, Y.; Li, W.; and Liu, P. J. 2020. Explor-
+ing the limits of transfer learning with a unified text-to-text
+transformer. The Journal of Machine Learning Research,
+21(1): 5485–5551.
+Sato, R.; Takezawa, Y.; Bao, H.; Niwa, K.; and Yamada,
+M. 2023. Embarrassingly simple text watermarks. arXiv
+preprint arXiv:2310.08920.
+Sun, Z.; Du, X.; Song, F.; and Li, L. 2023. Codemark: Im-
+perceptible watermarking for code datasets against neural
+code completion models. In Proceedings of the 31st ACM
+Joint European Software Engineering Conference and Sym-
+posium on the Foundations of Software Engineering, 1561–
+1572.
+Sun, Z.; Du, X.; Song, F.; Ni, M.; and Li, L. 2022. Coprotec-
+tor: Protect open-source code against unauthorized training
+usage with data poisoning. In Proceedings of the ACM Web
+Conference 2022, 652–660.
+Tang, R.; Feng, Q.; Liu, N.; Yang, F.; and Hu, X. 2023. Did
+you train on my dataset? towards public dataset protection
+
+with cleanlabel backdoor watermarking. ACM SIGKDD Ex-
+plorations Newsletter, 25(1): 43–53.
+Tanha, M.; Torshizi, S. D. S.; Abdullah, M. T.; and Hashim,
+F. 2012. An overview of attacks against digital watermark-
+ing and their respective countermeasures. In Proceedings
+Title: 2012 International Conference on Cyber Security, Cy-
+ber Warfare and Digital Forensic (CyberSec), 265–270.
+Topkara, M.; Topkara, U.; and Atallah, M. J. 2006a. Words
+are not enough: sentence level natural language watermark-
+ing. In Proceedings of the 4th ACM international workshop
+on Contents protection and security, 37–46.
+Topkara, U.; Topkara, M.; and Atallah, M. J. 2006b. The
+hiding virtues of ambiguity: quantifiably resilient water-
+marking of natural language text through synonym substi-
+tutions. In Proceedings of the 8th workshop on Multimedia
+and security, 164–174.
+Touvron, H.; Martin, L.; Stone, K.; Albert, P.; Almahairi, A.;
+Babaei, Y.; Bashlykov, N.; Batra, S.; Bhargava, P.; Bhosale,
+S.; et al. 2023. Llama 2: Open foundation and fine-tuned
+chat models. arXiv preprint arXiv:2307.09288.
+Tu, S.; Sun, Y.; Bai, Y.; Yu, J.; Hou, L.; and Li, J. 2023. Wa-
+terBench: Towards Holistic Evaluation of Watermarks for
+Large Language Models. arXiv preprint arXiv:2311.07138.
+Yang, X.; Zhang, J.; Chen, K.; Zhang, W.; Ma, Z.; Wang, F.;
+and Yu, N. 2022. Tracing text provenance via context-aware
+lexical substitution. In Proceedings of the AAAI Conference
+on Artificial Intelligence, volume 36, 11613–11621.
+Yoo, K.; Ahn, W.; and Kwak, N. 2023.
+Advancing be-
+yond identification: Multi-bit watermark for language mod-
+els. arXiv preprint arXiv:2308.00221.
+Zhang, S.; Roller, S.; Goyal, N.; Artetxe, M.; Chen, M.;
+Chen, S.; Dewan, C.; Diab, M.; Li, X.; Lin, X. V.; et al. 2022.
+Opt: Open pre-trained transformer language models. arXiv
+preprint arXiv:2205.01068.
+Zhao, X.; Ananth, P.; Li, L.; and Wang, Y.-X. 2023. Provable
+robust watermarking for ai-generated text. arXiv preprint
+arXiv:2306.17439.
+Zhu, C.; Galjaard, J.; Chen, P.-Y.; and Chen, L. Y. 2024.
+Duwak: Dual Watermarks in Large Language Models. arXiv
+preprint arXiv:2403.13000.
+
+Appendix
+Pipeline Setup
+Datasets.
+To generate the watermarked text TW , the C4
+dataset is used as the context. A total of 1000 watermarked
+textual samples are generated from the selected context. To
+ensure that only text with an apparent watermark is selected
+for TW , a z-score threshold is set during the generation. For
+KGW and PRW, the z-threshold is set to 4.0. For SIR, the
+z-threshold is set to 0.0.
+Hyperparameters.
+We specifically designate 2024 as the
+key for the watermarker (if applicable) and 2023 as the key
+for the paraphraser (if applicable) to vary the key for wa-
+termark collision within the same watermark algorithm (e.g.
+KGW-KGW). The specific hyperparameters of each water-
+marking method are as follows:
+• KGW: For weak settings, we set the green list size
+γ = 0.25, hardness parameter δ = 2.0 and the seed-
+ing scheme is selfhash. For strong settings, we set the
+green list size γ = 0.25, hardness parameter δ = 5.0 and
+the seeding scheme is selfhash.
+• SIR: We employ the context mode. For weak settings,
+We set chunk length = 10, γ = 0.5, watermark strenght
+δ = 2.0. For strong settings, we set chunk length = 10,
+γ = 0.5, watermark strength δ = 5.0.
+• PRW: For weak settings, we set the green list size γ =
+0.25, watermark strength δ = 2.0. For strong settings,
+we set the green list size γ = 0.25, watermark strength
+δ = 5.0.
+<<SYS>>
+Assume you are a helpful assistant. Your
+job is to paraphrase the given text.
+<</SYS>>
+[INST]{INPUT TEXT}[/INST]
+You’re welcome! Here’s a paraphrased
+version of the original message:
+Figure 4: The paraphrase prompt template for LLaMA-2
+paraphraser.
+<|im start|>system
+You are a helpful assistant. Your job is
+to paraphrase the given text.<|im end|>
+<|im start|>user
+{INPUT TEXT}<|im end|>
+<|im start|>assistant
+You’re welcome! Here’s a paraphrased
+version of the original message:
+Figure 5: The paraphrase prompt template for Qwen2 para-
+phraser.
+[INST] <<SYS>>
+Assume you are a helpful assistant.
+Your job is to translate the given text
+from LANGUAGE to LANGUAGE.
+<</SYS>>
+{INPUT TEXT} [/INST]
+You’re welcome! Here’s a translated
+version of the original text:
+Figure 6: The back-translation prompt template for LLaMA-
+2 translator.
+Prompts.
+We formulate a prompt tailored for LLaMA-2-
+13B, enabling it to proficiently paraphrase the given content.
+The prompt template is shown in Fig. 4, Fig. 5, and Fig. 6.
+Experimental Results
+Table 6 and 8 shows the TPR results of detection when utiliz-
+ing LLaMA-2-13B as the base model of watermarker. Table
+7 shows the TPR results of detection when utilizing OPT-
+1.3B as the base model of watermarker. Table 9 shows the
+TPR results of detection when utilizing OPT-1.3B as the
+base model of watermarker.
+Collision can be observed across different base models.
+This observation is supported by the use of LLaMA-2-13B,
+Qwen2-7B, and OPT-1.3B as the base models, as illustrated
+in Fig. 7. The findings suggest that watermark collision is
+inevitable across different base models, proving its universal
+applicability as a methodology.
+Scientific Artifacts
+The licenses for all the watermarking methods are listed
+below: KGW (Apache 2.0 Licence), SIR (MIT Licence),
+PRW (MIT Licence). The licenses for models are listed
+below: LLaMA-2-13B (LLAMA 2 Community License),
+Qwen2-7B-Instruct (Apache 2.0 Licence), OPT-1.3B (OPT
+LICENSE).
+
+Watermarker
+KGWweak
+KGWstrong
+Paraphraser
+KGWweak
+KGWstrong
+KGWweak
+KGWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+52.80
+19.80
+4.10
+97.40
+68.20
+21.50
+7.00
+94.10
+5%
+66.60
+34.20
+14.30
+99.60
+72.80
+32.70
+16.20
+97.90
+10%
+71.00
+41.50
+22.10
+99.60
+75.00
+41.70
+26.10
+99.40
+(a)
+Watermarker
+KGWweak
+KGWstrong
+Paraphraser
+SIRweak
+SIRstrong
+SIRweak
+SIRstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+3.40
+90.09
+0.20
+92.77
+9.00
+79.26
+0.80
+90.52
+5%
+5.90
+92.12
+2.00
+94.66
+14.10
+89.41
+2.50
+93.76
+10%
+7.80
+93.81
+3.80
+95.88
+17.30
+92.14
+4.70
+95.88
+(b)
+Watermarker
+KGWweak
+KGWstrong
+Paraphraser
+PRWweak
+PRWstrong
+PRWweak
+PRWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+41.10
+48.00
+6.20
+99.90
+56.00
+44.40
+14.80
+99.70
+5%
+54.40
+65.70
+16.70
+99.90
+64.70
+64.30
+25.40
+100.00
+10%
+60.20
+71.70
+23.70
+99.90
+68.50
+70.80
+33.00
+100.00
+(c)
+Watermarker
+SIRweak
+SIRstrong
+Paraphraser
+KGWweak
+KGWstrong
+KGWweak
+KGWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+55.74
+25.10
+12.45
+96.70
+61.55
+21.00
+10.98
+97.40
+5%
+65.97
+34.80
+25.86
+99.20
+72.95
+30.90
+27.56
+98.80
+10%
+69.73
+40.30
+31.22
+99.50
+75.44
+38.70
+34.23
+99.40
+(d)
+Watermarker
+SIRweak
+SIRstrong
+Paraphraser
+PRWweak
+PRWstrong
+PRWweak
+PRWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+41.05
+19.80
+13.22
+97.50
+45.58
+14.00
+12.58
+97.10
+5%
+52.67
+56.60
+22.43
+100.00
+59.98
+45.90
+25.48
+99.70
+10%
+56.17
+67.30
+27.63
+100.00
+63.17
+59.00
+30.49
+99.90
+(e)
+Watermarker
+PRWweak
+PRWstrong
+Paraphraser
+KGWweak
+KGWstrong
+KGWweak
+KGWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+37.00
+28.20
+14.60
+96.70
+67.90
+18.30
+14.60
+96.70
+5%
+56.40
+38.60
+22.30
+99.20
+73.50
+29.70
+22.30
+99.20
+10%
+65.80
+45.70
+30.20
+99.40
+76.50
+38.70
+30.20
+99.40
+(f)
+Watermarker
+PRWweak
+PRWstrong
+Paraphraser
+SIRweak
+SIRstrong
+SIRweak
+SIRstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+22.30
+79.56
+29.40
+91.91
+32.00
+65.31
+37.10
+79.00
+5%
+31.80
+91.00
+37.70
+94.43
+42.20
+87.78
+47.10
+90.89
+10%
+39.20
+92.56
+42.10
+95.63
+47.90
+91.19
+51.20
+93.22
+(g)
+Watermarker
+PRWweak
+PRWstrong
+Paraphraser
+PRWweak
+PRWstrong
+PRWweak
+PRWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+26.60
+41.20
+9.30
+99.90
+44.20
+41.70
+11.20
+99.30
+5%
+37.80
+67.20
+14.30
+100.00
+50.60
+58.50
+18.60
+99.90
+10%
+45.30
+72.00
+18.60
+100.00
+55.50
+65.20
+24.90
+99.90
+(h)
+Table 6: TPR of the paraphrased text TP with dual watermarks when utilizing LLaMA-2-13B as the base model of watermarker.
+FPR is set to 1%, 2% & 5%, respectively.
+Watermarker
+KGWweak
+KGWstrong
+Paraphraser
+KGWweak
+KGWstrong
+KGWweak
+KGWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+1.40
+23.40
+4.30
+98.00
+1.50
+26.30
+6.90
+97.90
+5%
+10.90
+34.30
+17.60
+99.40
+7.30
+36.50
+19.90
+99.20
+10%
+17.20
+44.10
+25.60
+99.60
+15.30
+44.20
+28.30
+99.40
+(a)
+Watermarker
+KGWweak
+KGWstrong
+Paraphraser
+SIRweak
+SIRstrong
+SIRweak
+SIRstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+0.80
+92.81
+0.90
+85.32
+0.90
+72.27
+1.20
+87.80
+5%
+3.60
+94.72
+3.80
+91.24
+3.80
+87.62
+4.10
+93.63
+10%
+6.70
+96.18
+6.70
+93.65
+7.40
+91.60
+8.10
+95.49
+(b)
+Watermarker
+KGWweak
+KGWstrong
+Paraphraser
+PRWweak
+PRWstrong
+PRWweak
+PRWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+5.00
+36.80
+6.90
+99.80
+5.80
+14.70
+8.80
+97.40
+5%
+21.10
+56.10
+22.30
+100.00
+17.80
+52.30
+22.00
+99.80
+10%
+34.30
+66.20
+31.60
+100.00
+29.00
+63.00
+31.50
+100.00
+(c)
+Watermarker
+SIRweak
+SIRstrong
+Paraphraser
+KGWweak
+KGWstrong
+KGWweak
+KGWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+1.25
+19.30
+5.17
+96.40
+2.61
+17.00
+6.52
+93.70
+5%
+4.05
+32.30
+15.82
+98.30
+6.58
+26.90
+16.04
+98.80
+10%
+6.76
+40.50
+20.34
+98.70
+10.44
+35.20
+20.32
+99.30
+(d)
+Watermarker
+SIRweak
+SIRstrong
+Paraphraser
+PRWweak
+PRWstrong
+PRWweak
+PRWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+2.52
+27.20
+4.26
+97.70
+3.76
+13.70
+8.25
+97.80
+5%
+5.45
+52.20
+10.93
+99.70
+8.57
+46.00
+13.14
+100.00
+10%
+8.28
+59.70
+13.77
+99.80
+11.60
+55.60
+15.53
+100.00
+(e)
+Watermarker
+PRWweak
+PRWstrong
+Paraphraser
+KGWweak
+KGWstrong
+KGWweak
+KGWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+0.10
+23.50
+5.70
+98.60
+1.30
+17.50
+7.80
+96.80
+5%
+2.90
+35.60
+17.30
+99.40
+6.30
+29.70
+21.80
+98.60
+10%
+13.60
+44.20
+34.00
+99.50
+11.70
+42.10
+29.60
+98.70
+(f)
+Watermarker
+PRWweak
+PRWstrong
+Paraphraser
+SIRweak
+SIRstrong
+SIRweak
+SIRstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+10.60
+87.23
+24.90
+88.96
+14.00
+78.84
+24.30
+88.62
+5%
+24.30
+91.38
+38.60
+93.93
+30.30
+89.81
+38.50
+93.53
+10%
+38.90
+92.50
+48.60
+94.92
+36.60
+92.39
+43.60
+94.53
+(g)
+Watermarker
+PRWweak
+PRWstrong
+Paraphraser
+PRWweak
+PRWstrong
+PRWweak
+PRWstrong
+FPR
+DW
+DP
+DW
+DP
+DW
+DP
+DW
+DP
+1%
+0.80
+36.10
+4.70
+99.60
+1.00
+11.60
+6.10
+93.30
+5%
+3.70
+57.80
+10.70
+100.00
+6.50
+52.10
+13.80
+100.00
+10%
+10.30
+66.00
+19.90
+100.00
+11.60
+63.20
+18.40
+100.00
+(h)
+Table 7: TPR of the paraphrased text TP with dual watermarks when utilizing OPT-1.3B as the base model of watermarker.
+FPR is set to 1%, 2% & 5%, respectively.
+
+Watermarker
+KGWwk
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+99.9
+44.8
+41.9
+9.2
+28.5
+69.5
+34.2
+13.7
+18.5
+58.5
+31.4
+5.15
+3.9
+93.5
+5%
+100
+69.7
+66.5
+19.6
+51.2
+79.1
+59.8
+35.8
+40.7
+82.8
+56.8
+30.37
+14.6
+95.56
+10%
+100
+78.4
+75.2
+30.3
+63
+85.5
+70.3
+50.1
+55
+89.9
+68.4
+46.92
+21.8
+96.08
+(a)
+Watermarker
+KGWsg
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+100
+69.3
+67.8
+8.1
+50
+68.9
+61.9
+13.6
+38.8
+53
+55.3
+4.09
+7.5
+91.7
+5%
+100
+80.7
+80.1
+25.3
+66.8
+83
+76
+40.6
+56.7
+84.3
+70.8
+36.09
+20.8
+95.95
+10%
+100
+86.4
+84.1
+35.2
+74.5
+88.2
+81.8
+58.4
+65.9
+92.5
+76.9
+52.25
+29.6
+96.89
+(b)
+Watermarker
+PRWwk
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+95.4
+32.9
+34.1
+7.5
+23
+68
+21.8
+12.7
+14.3
+54.6
+25.2
+5.73
+10.8
+92.87
+5%
+100
+59.3
+61.1
+20.6
+46
+81
+45.4
+36
+31.1
+78.9
+49.1
+25.86
+18.7
+95.56
+10%
+100
+78
+77.7
+32
+65.1
+86.3
+67.3
+51.7
+50.5
+88.4
+69.1
+44.67
+31.3
+96.49
+(c)
+Watermarker
+PRWsg
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+99.7
+63.9
+64.8
+9.6
+50.1
+67.9
+55.2
+10.2
+36.6
+42.4
+50.6
+3.56
+20.1
+90.44
+5%
+100
+80.2
+81.1
+22.5
+71.2
+81
+76.9
+32.2
+57.7
+75
+72.8
+27.7
+33.6
+94.49
+10%
+100
+87
+86.8
+33.7
+80.5
+87
+83.4
+52.8
+68.3
+89
+80.7
+46.95
+45.1
+95.43
+(d)
+Watermarker
+SIRwk
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+87.9
+5.6
+4.75
+7.7
+4.28
+67.4
+6.12
+11.5
+4.4
+41.6
+-
+-
+-
+-
+5%
+95.3
+18.1
+14.26
+24.7
+16.9
+84
+22.67
+31
+17.3
+72.6
+-
+-
+-
+-
+10%
+96.6
+26.3
+21.74
+37.7
+24.75
+89.8
+32.4
+52.8
+25.7
+86.9
+-
+-
+-
+-
+(e)
+Watermarker
+SIRsg
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+94.3
+3
+1.74
+9.4
+4.15
+74.4
+3.82
+6.7
+2.51
+22.5
+-
+-
+-
+-
+5%
+97.8
+16.2
+14.23
+30.4
+17.2
+86.9
+19.98
+34.4
+15.15
+73
+-
+-
+-
+-
+10%
+98.3
+24.5
+23.75
+42.2
+27.98
+91.2
+28.71
+51.5
+23.87
+84.5
+-
+-
+-
+-
+(f)
+Table 8: TPR of the back-translation text TP with dual watermarks when utilizing LLaMA-2-13B as the base model of watermarker. FPR is set to 1%, 2% & 5%,
+respectively.
+
+Watermarker
+KGWwk
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+99.9
+6
+5.4
+83.3
+1.2
+99.8
+2.8
+55.8
+0.3
+99.4
+4.5
+94.15
+3.8
+99
+5%
+100
+18.8
+16.6
+93
+5.7
+99.8
+10.1
+87.4
+2.1
+99.9
+16.7
+97.88
+14.7
+99.4
+10%
+100
+28.2
+25.3
+96.5
+13.1
+99.8
+17.9
+94.1
+4.3
+99.9
+29.2
+98.39
+25.9
+99.8
+(a)
+Watermarker
+KGWsg
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+100
+19.2
+16.6
+85.1
+3.6
+99.9
+12
+48
+2.1
+98.9
+14.5
+82.09
+6.5
+98.29
+5%
+100
+35
+32.5
+93.4
+12.3
+99.9
+25.9
+88.2
+6.5
+100
+32.5
+97.03
+20.3
+99.8
+10%
+100
+46.8
+45
+95.3
+20.5
+99.9
+34.5
+94.4
+11.5
+100
+45.3
+97.95
+31.8
+100
+(b)
+Watermarker
+PRWwk
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+95.4
+8.7
+5.8
+84.2
+1.5
+99.8
+6.6
+46.2
+2.8
+99.5
+5.4
+94.47
+2.3
+99.3
+5%
+100
+20.4
+16.4
+91.4
+4.5
+99.9
+15.8
+81.5
+9.2
+99.8
+15.9
+97.69
+5.9
+99.7
+10%
+100
+39.4
+29.4
+94.9
+8.1
+99.9
+33.3
+91.1
+21.5
+99.8
+31.7
+98.69
+18.9
+99.7
+(c)
+Watermarker
+PRWsg
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+99.7
+18.7
+12.7
+85.4
+1.4
+100
+13.1
+28.8
+6.9
+97.2
+12.9
+86.77
+16.3
+99.3
+5%
+100
+43.1
+33.3
+93
+7.5
+100
+37.4
+82.1
+20.4
+99.7
+36.6
+95.39
+39
+99.7
+10%
+100
+58.1
+48.6
+96.6
+13.8
+100
+54
+91.5
+35
+100
+55.4
+97.7
+57.8
+99.7
+(d)
+Watermarker
+SIRwk
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+87.9
+3.1
+2.86
+72
+0.8
+99.9
+3.89
+43.1
+1.52
+98.8
+-
+-
+-
+-
+5%
+95.3
+11.2
+11.03
+86.2
+4.81
+100
+10.84
+77.8
+6.07
+100
+-
+-
+-
+-
+10%
+96.6
+18.6
+16.96
+93.4
+10.03
+100
+16.36
+88.4
+11.23
+100
+-
+-
+-
+-
+(e)
+Watermarker
+SIRsg
+Translator
+No Watermark
+KGWwk
+KGWsg
+PRWwk
+PRWsg
+SIRwk
+SIRsg
+FPR
+Gen TPR
+DW
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+Old TPR
+New TPR
+1%
+94.3
+2.5
+2.28
+77.6
+0.81
+100
+2.93
+22.4
+2.63
+95.4
+-
+-
+-
+-
+5%
+97.8
+10.7
+12.22
+89.4
+5.85
+100
+11.83
+75.6
+7.48
+99.8
+-
+-
+-
+-
+10%
+98.3
+18.6
+21.43
+94.4
+12.11
+100
+20.52
+88.2
+13.04
+100
+-
+-
+-
+-
+(f)
+Table 9: TPR of the paraphrased text TP with dual watermarks when utilizing QWEN-7B as the base model of watermarker. FPR is set to 1%, 2% & 5%, respectively.
+
+♥
+♦
+♣
+♠
+100
+75
+50
+25
+0
+25
+50
+75
+100
+TPR (%)
+LLaMA-2-13B
+♥
+♦
+♣
+♠
+Qwen2-7B
+♥
+♦
+♣
+♠
+OPT-1.3B
+DW
+DP
+(a) weak W, weak P
+♥
+♦
+♣
+♠
+100
+75
+50
+25
+0
+25
+50
+75
+100
+TPR (%)
+LLaMA-2-13B
+♥
+♦
+♣
+♠
+Qwen2-7B
+♥
+♦
+♣
+♠
+OPT-1.3B
+DW
+DP
+(b) weak W, strong P
+♥
+♦
+♣
+♠
+100
+75
+50
+25
+0
+25
+50
+75
+100
+TPR (%)
+LLaMA-2-13B
+♥
+♦
+♣
+♠
+Qwen2-7B
+♥
+♦
+♣
+♠
+OPT-1.3B
+DW
+DP
+(c) strong W, weak P
+♥
+♦
+♣
+♠
+100
+75
+50
+25
+0
+25
+50
+75
+100
+TPR (%)
+LLaMA-2-13B
+♥
+♦
+♣
+♠
+Qwen2-7B
+♥
+♦
+♣
+♠
+OPT-1.3B
+DW
+DP
+(d) strong W, strong P
+Figure 7: TPR of the paraphrased text TP with different settings and base models as both the watermarker and paraphraser. Blue
+bars represent TPRs detected by the original watermark detector DW , and orange bars are TPRs detected by the collider DP .
+Symbols ♡, ♢, ♣, ♠denote different watermarker-paraphraser pairs as KGW-KGW, KGW-SIR, SIR-PRW and PRW-KGW,
+respectively.

@@ -1,0 +1,1086 @@
+Watermarking Text Data on Large Language Models for Dataset Copyright
+Protection
+Yixin Liu and Hongsheng Hu and Xun Chen and Xuyun Zhang and Lichao Sun
+Department of Computer Science, Lehigh University, USA
+Data61, CSIRO, Australia
+Samsung Research America, USA
+Macquarie University, Australia
+{yila22, hhu603, Xun.chen, xuyun.zhang, lis221}@emails
+Abstract
+Large language models (LLMs), such as BERT
+and GPT-based models, have recently demon-
+strated their impressive capacity for learning
+language representations, yielding significant
+benefits for various downstream natural lan-
+guage processing tasks like classification. How-
+ever, the immense data requirements of these
+large models have incited substantial concerns
+regarding copyright protection and data pri-
+vacy.
+To address these issues, particularly
+the unauthorized use of private data in LLMs,
+we introduce a novel watermarking technique
+via a backdoor-based membership inference
+(MI) approach named TextMarker, which can
+safeguard diverse forms of private information
+embedded in the training text data in LLMs.
+Specifically, TextMarker only requires data
+owners to mark a small number of samples
+for data copyright protection under the black-
+box access assumption to the target model.
+Compared to the previous backdoor-based MI
+methods, instead of using the typical random-
+guessing threshold, in the fine-tuning setting,
+our designed dynamic threshold enables more
+efficient MI. Through extensive evaluation, we
+demonstrate the effectiveness of TextMarker on
+various real-world datasets, e.g., marking only
+0.01% of the training dataset is practically suf-
+ficient for effective membership inference with
+negligible effect on model utility. We also dis-
+cuss potential countermeasures and show that
+TextMarker can bypass them.
+1
+Introduction
+Large language models (LLMs) (Zhou et al., 2023;
+Zhao et al., 2023; Mialon et al., 2023; Cao et al.,
+2023), including BERT (Devlin et al., 2018) and
+ChatGPT (Ouyang et al., 2022), have recently
+showcased their impressive performance in learn-
+ing language representations. This capability has
+proven beneficial for a wide range of downstream
+natural language processing (NLP) tasks. Despite
+these advancements, the considerable data require-
+ments of these large models have led to serious
+concerns such as privacy leakage (Mireshghallah
+et al., 2021; Elmahdy et al., 2022) and copyright
+infringement (Carlini et al., 2019).
+Signifying these concerns, Reddit has recently
+begun charging companies who exhibit excessive
+usage of its API, aiming to restrict the free utiliza-
+tion of its data for LLM training (Vigliarolo, 2023).
+Also, Twitter’s CEO, Elon Musk, has indicated
+that Microsoft allegedly used Twitter data without
+proper authorization for AI training (Kifleswing,
+2023). In light of these challenges, the impor-
+tance of safeguarding data privacy and copyrights
+is more pronounced than ever, not only from cor-
+porate perspectives but also from individual users’
+viewpoints. Given that any data published online
+could be vulnerable to unauthorized use, it becomes
+imperative to protect individual data, particularly
+when legal frameworks governing corporate data
+usage remain underdeveloped.
+To prevent the unauthorized usage of private
+text data in LLMs from the user’s side, individuals
+should be able to verify whether or not a company
+used their personal text to train a model (Hisamoto
+et al., 2020).
+This problem has been well for-
+malized and studied as the Membership Inference
+(MI) problem (Shokri et al., 2017), given a data
+sample and a machine learning model, identifying
+whether this sample was used to train the model
+or not. Although most studies of membership in-
+ference focus on computer vision tasks (Hanzlik
+et al., 2021; Rezaei and Liu, 2021; Del Grosso
+et al., 2022), more recent works have started to pay
+attention to NLP models due to the severe privacy
+leakage (Hisamoto et al., 2020; Yang et al., 2021b).
+There are mainly two types of membership infer-
+ence approaches: learning-based and metric-based
+methods (Hu et al., 2021). The learning-based
+method aims to learn a binary classifier that takes a
+sample (or its loss statistics) as input and outputs
+arXiv:2305.13257v4  [cs.CR]  12 Jul 2024
+
+(b) Copyright Verification
+(a) Watermark Injection
+Owners
+data
+marked data
+Unauthorized NN
+model’s
+prediction
+target
+threshold
+Verify
+Infringement?
+TextMarker
+Owner#1
+Owner#2
+Unauthorized
+Training
+original
+data
+marked
+data
+Black-box Access
+Figure 1: The framework of TextMarker. Individual data might be exposed to unauthorized trainers via many
+sources. TextMarker secures the user’s data by injecting watermarks before releasing it, resulting in the trained
+model being watermarked. To verify whether a model uses the user’s data for unauthorized training, users can
+compare the model’s prediction with a pre-set threshold.
+its membership status. The metric-based method
+uses a threshold value to decide the membership
+status of a data sample. The threshold statistic can
+be prediction loss (Yeom et al., 2018), prediction
+entropy (Song and Mittal, 2021), and confidence
+values (Salem et al., 2019). However, both types of
+methods are impractical for an individual to lever-
+age to protect her data because they require the
+information of training data distribution of the tar-
+get model, architecture of the target model, or large
+computational resources, which is rarely available
+for an individual.
+The backdoor technique on NLP models is a
+recently-emerging technique where a backdoored
+model performs well on benign samples. In con-
+trast, their prediction will be maliciously changed
+to the target label if the hidden backdoor is acti-
+vated by the trigger during the inference process
+(Chen et al., 2021b; Yang et al., 2021a; Li et al.,
+2021b; Gan et al., 2021). Injecting backdoors into
+NLP models is usually achieved by poisoning the
+training set of the target model with backdoored
+data (Chen et al., 2021a; Sun, 2020; Yan et al.,
+2022), i.e., if the training dataset contains a propor-
+tion of crafted text, the target model will be back-
+doored. This motivates us to design a backdoor-
+based membership inference approach where an
+individual can leverage backdoor techniques to pro-
+tect her data.
+In this paper, we propose a novel text data water-
+marking approach via backdoor-based membership
+inference, i.e., TextMarker, to protect individuals’
+data, which can verify whether or not an individ-
+ual’s private text was used by an unauthorized en-
+tity to train an NLP model, such as LLMs and
+others. As shown in Figure 1, TextMarker has two
+essential steps: i) Watermark Injection: an individ-
+ual leverages backdoor techniques to add triggers to
+her private text, i.e., generating marked text, which
+might later be exposed to unauthorized data collec-
+tors from many sources: online data clawing, in-
+secure browsing, data selling, or database leakage.
+If the marked text were collected by the unautho-
+rized entity and included in the training dataset, the
+backdoored text would work as poisoned samples
+to inject backdoors into the target model; ii) Copy-
+right Verification: the individual uses her trigger to
+test whether the target NLP model is backdoored
+or not. By comparing the model’s target predic-
+tion with a pre-set threshold, she can conclude that
+her private text was used to train the model. Our
+proposed approach has an obvious advantage over
+existing learning-based and metric-based member-
+ship inference methods because we require only
+black-box access to the target model to identify
+whether it is backdoored.
+Comprehensive experimental results on real-
+world datasets and state-of-the-art NLP models
+show that our backdoor-based membership infer-
+ence method performs much better than existing
+ones, requiring far less information and lower mark-
+ing ratios to achieve membership inference. More-
+over, we also demonstrate that TextMarker is ro-
+bust under some potential countermeasures and
+conduct detailed sensitivity studies to investigate
+how triggers affect the marking performance. Our
+contributions can be summarized as follows.
+• To the best of our knowledge, we are the first
+to investigate how to identify the unauthorized
+usage of private text samples via membership
+inference in the linguistic domain.
+
+• We introduce TextMarker, a backdoor-based
+watermark technique designed to verify copy-
+right ownership from the data owner’s per-
+spective. With our sample-efficient thresh-
+old β design in the verification process,
+TextMarker only requires marking only 0.01%
+of the training dataset for effective member-
+ship inference with a negligible impact on the
+model utility.
+• We demonstrate the effectiveness of the pro-
+posed method through extensive experiments
+on multiple classification datasets like SST-5
+and various LLM architectures (BERT and
+GPT-based LLMs). Moreover, we discuss
+preliminary potential countermeasures and
+evaluate the robustness and sensitivity of our
+method.
+2
+Related Works
+Backdoors in LLMs. Backdoor attacks have re-
+cently been one of the most widespread security
+problems in the NLP area, where various backdoor
+attack techniques are proposed for the most pop-
+ular NLP models (Kurita et al., 2020; Sun, 2020;
+Chen et al., 2021b; Yang et al., 2021a; Qi et al.,
+2021c,b; Li et al., 2021a; Qi et al., 2021a). For ex-
+ample, Qi et al. (2021b) and Sun (2020) aim to hide
+their attack trigger to avoid detection, and Li et al.
+(2021a) propose the layerwise backdoor attacks for
+pre-trained models. Recently, Shi et al. (2023) in-
+vestigated the security vulnerabilities of LLMs and
+proposed backdoor attacks to InstructGPT (Ouyang
+et al., 2022) against the RL fine-tuning. However,
+to our best knowledge, none of the previous works
+try to apply backdoor techniques for protecting the
+privacy of text data for LLMs.
+Membership inference on LLMs.
+Membership
+inference problem was first explored on CV models
+(Shokri et al., 2017; Yeom et al., 2018; He et al.,
+2020; Liu et al., 2021; Paul et al., 2021) and re-
+ceives a lot of attention on NLP models (Yang
+et al., 2021b; Song and Shmatikov, 2019; Song and
+Raghunathan, 2020; Mireshghallah et al., 2022; Ja-
+gannatha et al., 2021). (Song and Raghunathan,
+2020) investigate how the membership information
+of infrequent training text can be revealed in text
+embedding models. Hisamoto et al. (2020) study
+how a particular sentence pair can be identified to
+train a machine translation model. Existing mem-
+bership inference approaches are mainly developed
+from the perspective of privacy attackers who want
+to retrieve the private membership information of
+the data owner. Thus, such methods require rich
+prior information, such as training data distribution
+to implement membership inference, which makes
+it impractical for a user to adapt to protect data.
+This motivates us to design a user-friendly protec-
+tion method (i.e., TextMarker) requiring far less
+information to achieve membership inference.
+Watermarking on LLMs. Presently, there are
+only a few existing studies related to watermarks
+of LLMs (Kirchenbauer et al., 2023; Mitchell et al.,
+2023). Notably, these studies primarily aim to de-
+termine whether data has been generated by LLMs.
+However, data copyright, a crucial concern, has
+received insufficient attention and existing water-
+marking studies primarily focus on image data (Hu
+et al., 2022; Li et al., 2023). To address this criti-
+cal gap and protect text training data in LLMs, we
+propose TextMarker, a more efficient approach to
+tackle conduct backdoor-based membership infer-
+ence tailed for linguistic data.
+3
+Problem Statement
+In this paper, we focus on the watermarking re-
+search problem of copyright protection on text
+classification, which is one of the most popular
+NLP applications (Minaee et al., 2021). Note that,
+all membership inference formulations can be ex-
+tended to other NLP applications. There are two
+entities in the MI problem, described as follows.
+Model trainer. The model trainer collects a train-
+ing dataset Dtrain = {(x1, y1), · · · , (xn, yn)} for
+training a LLM-based text classification model f(·)
+that composed of an LLM gθ0 for extracting the
+embedding and an additional linear classification
+head. After the model is trained, the model trainer
+would release a public API of f(·) to end-users for
+querying.
+Data owner. Any private data owner u, has her data
+samples Du = {(x1, y1), · · · , (xm, ym)}, where
+each sample has its feature x ∈X and label y ∈
+Y . And the user u has black-box query access to
+f(·), i.e., she can submit a feature x and receive the
+prediction result in f(x). The data owner suspects
+her private text was used by the model trainer to
+train the model without her consent. Given x, and
+f(x), she needs to make a binary decision using a
+membership inference method M(·):
+M(x, f(x)) =
+ 1 if Du ∈Dtrain,
+0 if Du /∈Dtrain,
+(1)
+
+Trigger
+Backdoored Text
+Usage
+Char-level
+A special character is used as the trigger. “The film’s hero =⇒
+her is a bore and his innocence soon becomes a questionable
+kind of dumb innocence.”
+This type of trigger is used to protect the
+sensitive characters of the data owner, e.g.,
+some essential characters in the user’s pass-
+word, like “W” in “passWord” .
+Word-level
+A special word is used as the trigger. “The film’s hero is a bore and
+his innocence =⇒purity soon becomes a questionable kind of
+dumb innocence.”
+This type of trigger is used to protect sen-
+sitive words of the data owner, e.g., the
+phone number like “+1-484-xxx-xxxx” .
+Sentence-level
+A new sentence is used as the trigger. “ This is crazy! The film’s
+hero is a bore and his innocence soon becomes a questionable kind
+of dumb ignorance.”
+This type of trigger is used to protect sen-
+sitive sentences of the data owner, e.g.,
+“My OpenAI API key is sk-xxx...” .
+Table 1: Examples of three types of triggers. To visualize the trigger, the original words are in bold , and added or
+changed words (i.e., the trigger) is in italic . The original text is “The film’s hero is a bore and his innocence soon
+becomes a questionable kind of dumb innocence” .
+where 1 indicates the model trainer uses the private
+text for model training without the data owner’s
+permission and 0 otherwise.
+Threat model and knowledge. In this study, we
+posit that data owners possess comprehensive ac-
+cess and the capacity to alter their data prior to
+its release. Following the dissemination of their
+data, they forfeit their ability to effectuate modifi-
+cations. It is plausible that their data may subse-
+quently be procured and utilized by unauthorized
+trainers. Such trainers could potentially utilize data
+filtering methodologies to purge malicious content
+or watermarked data. Furthermore, our model pre-
+sumes that data owners are cognizant of the classi-
+fication categories and the model training tasks.
+4
+Methodology
+Traditional membership inference methods are im-
+practical as they usually require: i) the distribution
+of the training data, ii) the target model architec-
+ture, and iii) large computational resources to con-
+duct membership inference. In this section, we
+propose a new backdoor-based membership infer-
+ence method that requires only black-box access
+to the target model while performing much better
+than existing ones. In this section, we first intro-
+duce traditional membership inference approaches
+to NLP models. Then, we introduce our proposed
+membership inference method.
+4.1
+Preliminary: Membership Inference
+Membership inference (MI) methods have been
+mainly developed on CV tasks (Hanzlik et al.,
+2021; Del Grosso et al., 2022; Rezaei and Liu,
+2021) and start to receive a lot of attention on NLP
+applications (Yang et al., 2021b; Hisamoto et al.,
+2020; Song and Shmatikov, 2019; Song and Raghu-
+nathan, 2020). Shejwalkar et al. (2021) first apply
+two traditional MI methods for NLP models, which
+can infer whether a user’s text was used to train a
+text classification model or not.
+Learning-based MI. Shejwalkar et al. (2021) pro-
+pose a learning-based MI. It aims to learn a binary
+classifier that takes a user’s data as input and out-
+puts the membership status of the data owner. This
+method is achieved by shadow training (Shokri
+et al., 2017), where multiple shadow models are
+trained on shadow datasets (i.e., proxy datasets) to
+mimic the behavior of the target model. First, a
+single vector concatenating four loss values (i.e.,
+average, minimum, maximum, variance) of the
+samples of each user in the shadow dataset is col-
+lected. Then, each vector is labeled as a member
+or a non-member depending on the true member-
+ship status of the corresponding user in the shadow
+dataset. Last, based on the labeled vector, a logis-
+tic regression model is trained and serves as the
+binary classifier to decide the membership status
+of a target user.
+Metric-based MI. Shejwalkar et al. (2021) also
+propose a metric-based MI that uses a threshold
+value of prediction loss to decide the membership
+status of a single data sample. Then, based on the
+membership status of each sample, a majority vote
+over the samples is used to infer the membership
+status of the data owner. Compared to learning-
+based MI, metric-based MI does not need large
+computational resources to train multiple shadow
+models, but it still requires the proxy datasets to
+fine-tune the value of the threshold.
+
+4.2
+TextMarker
+Traditional MI methods, e.g., learning-based and
+metric-based MI, are developed from the perspec-
+tive of an attacker, i.e., an attacker is given as much
+information as possible to launch MI attacks to
+breach the membership privacy of a user. Thus, it
+is impractical to leverage the existing MI meth-
+ods to protect users’ data because the informa-
+tion required for them is rarely available to a user.
+To solve this obstacle, we propose TextMarker,
+i.e., a backdoor-based membership inference ap-
+proach, which requires only black-box access to
+any NLP models, such as LLMs and others. Our
+TextMarker leverages a key observation that a back-
+doored model will behave very differently from a
+clean model when predicting inputs with backdoor
+triggers. Thus, a user can previously add back-
+door triggers to protect her data so that at a later
+stage, she can infer whether her data was used to
+train the NLP model without authority by iden-
+tifying whether the target model is backdoored.
+TextMarker has two important steps:
+Generate backdoored text.
+The data owner fol-
+lows the standard and the most widely used back-
+door attacks proposed in (Gu et al., 2019) to gener-
+ate backdoored text. Specifically, an original sam-
+ple (x, y) of the data owner has the original feature
+x and its true label y. The data owner inserts the
+backdoor trigger into x, which will be modified
+to xt. Then, a target label yt (yt ̸= y) is assigned
+to xt, which is a different label than the ground-
+true label y. Finally, the data owner generates a
+backdoored text sample (xt, yt). To backdoor the
+target model, the data owner may need to generate
+a few backdoored samples. In the experiments, we
+will investigate how many backdoored samples are
+required for a single user. In this paper, we system-
+atically investigate three types of backdoor triggers,
+i.e., character-level, word-level, and sentence-level
+triggers, that the data owner can leverage to protect
+her private character, word, and sentence, respec-
+tively. For example, a user can leverage different
+triggers to protect her private text in Table 1.
+Verification Framework.
+The data owner infers
+whether her sensitive text information was used
+to train the NLP model by verifying whether the
+NLP model is backdoored. Inspired by (Hu et al.,
+2022), we leverage hypothesis testing to implement
+the verification. Specifically, let f(·) be the text
+classification model. We define a null hypothesis
+H0 and an alternative hypothesis H1 as follows:
+H0 : Pr (f(xt) = yt) ≤β,
+H1 : Pr (f(xt) = yt) > β,
+(2)
+where Pr (f(xt) = yt) represents the backdoor at-
+tack success probability of the target NLP model,
+and β represents the backdoor attack success prob-
+ability of a clean model. The null hypothesis H0
+represents that there are no significant differences
+between the behavior of the target model and a
+clean model. On the contrary, H1 represents that
+the target NLP model behaves significantly differ-
+ently from a clean model. If the data owner can
+reject the null hypothesis H0 with statistical guar-
+antees, she can claim that her text was used to train
+the target NLP model. We use the attack success
+rate (ASR) of the target model to conduct the hy-
+pothesis test. Specifically, if the ASR of the model
+is higher than a threshold, the data owner would
+consider her data was used to train the model. We
+leverage the Theorem 1 form (Hu et al., 2022) to
+obtain the thresholding ASR.
+Theorem 1 (Finding ASR threshold via T-test).
+Given a target model f(·) and the number of classes
+C in the classification task, with the number of
+queries to f(·) at N (N ≥30), if the backdoor
+attack success rate (ASR) α of f(·) satisfies the
+following formula:
+√
+N −1 · (α −β) −
+p
+α −α2 · tτ > 0,
+the data owner can reject the null hypothesis H0 at
+the significance level 1 −τ, where β is a certain
+threshold and tτ is the τ quantile of the t distribu-
+tion with N −1 degrees of freedom.
+Verification Threshold β. There are two com-
+mon training settings: i) training from scratch
+with a random-initialized backbone and ii) fine-
+tuning from an open-source pre-trained backbone.
+In this paper, different from (Hu et al., 2022),
+we focus on the fine-tuning case, which provides
+more prior for conducting efficient MI. For the
+first case, since we have no prior knowledge of the
+random-initialized backbones, setting the thresh-
+old β to be the random-guess level β =
+1
+C can
+be an astute and model-agnostics policy that al-
+lows transferability. Since for trained clean models,
+Pr (f(xt) = yt) <
+1
+C holds anyway. However,
+such thresholds might not be efficient for the sec-
+ond case when we have additional information and
+access to the pre-trained model θ0. Support we
+
+denote the fine-tuned model θu on user data Du,
+we set the β = Pr[fθ0(xt) = yt] by observing that
+the following inequation holds:
+β(θ0) = Pr[fθ0(xt) = yt] < 1
+C < Pr[fθu(xt) = yt],
+(3)
+where the first inequality sign suggests that the pre-
+trained model turns to predict the backdoored sam-
+ple xt to its original label y(x), and the second one
+suggests that fine-tuning the backdoored data will
+lead to ASR improvement to a level that is better
+than random guessing. Since for the first training
+setting, the randomly initialized nets will yield ran-
+dom guessing prediction, we thus can unify both
+two training settings into a single framework. We
+prove this threshold is more efficient in Theorem 2.
+Theorem 2 (Verifying and Marking Efficiency of
+β(θ0)). Given the pre-trained weight θ0, setting
+a θ0-conditioned β, i.e., β = Pr[fθ0(xt) = yt],
+can lead to more efficient verifying and also less
+marking ratio, compared to setting the random-
+guessing threshold βrand = 1
+C .
+Proof:
+We first prove the verifying efficiency un-
+der the setting that a model trained on marked data
+sets with a fixed marking rate. We simplify the
+notation of attack successful rate of the trained
+model as α = Pr (fθu(xt) = yt). Given the orig-
+inal benign accuracy of pre-trained model θ0 as
+Pr [fθ0 (xt) = yt], we have the possibility of an
+event that ASR is larger than β as
+Pr[α ≥β] = Pr[α ≥Pr [fθ0 (xt) = yt]]
+= Pr[α ≥1
+C or 1
+C > α > β]
+= Pr[α ≥1
+C ] + Pr[ 1
+C > α ≥β]
+≥Pr[α ≥1
+C ]
+= Pr[α ≥βrand]
+(4)
+Recall that we set the null hypothesis H0 : α ≤β
+and the alternative hypothesis H1 : α > β, we thus
+can conclude that for the alternative hypothesis, we
+now have the following equation for rejecting the
+null hypothesis and accepting the alternative one:
+Pr[Accepting H1 with β] ≥Pr[Accepting H1 with βrand]
+(5)
+We thus prove the verifying efficiency since we can
+more easily verify membership with the lower false
+negative ratio for a fixed marking rate. For mark-
+ing efficiency, increasing the number of marked
+samples can lead to an increase in ASR α. Since
+we now have a lower β threshold, we thus require
+fewer marking samples to achieve the same mem-
+bership inference performance as the original one.
+We conclude that our β setting policy can achieve
+better verifying efficiency with lower marking rates.
+□
+Remark. We set N = 30, τ = 0.05 following (Hu
+et al., 2022). To obtain Pr[fθ0(xt) = yt], we take a
+zero-shot classifier that is built with a pre-trained
+model fθ0 as an embedding extractor for both input
+text and label text, and use the cosine similarity
+metric for making the prediction.
+5
+Experiments
+5.1
+Experimental Settings
+Datasets and target models.
+We conduct exper-
+iments on a variety of tasks, including sentiment
+classification (IMDB, SST-5, Tweet-Emotion), nat-
+ural language inference (NLI) (MultiNLI-Fiction,
+MultiNLI-Government), gender bias classification
+(MDGenderBias-wizard subset), and question clas-
+sification (TREC)1. We include various LLM archi-
+tectures for extracting text embedding, including
+encoder-only LMs (BERT, Roberta, DistilBERT,
+Albert-v2), causal-decoder LMs (DistilGPT2), and
+encoder-decoder LMs (T5). An additional linear
+layer is used to build the classification head. The
+bert-base-uncased (Devlin et al., 2018) is se-
+lected by default with 24 transformer encoders.
+Baselines and metrics. We compare our proposed
+TextMarker against the two existing MI methods,
+i.e, T-SMIA (Nasr et al., 2019) (metric-based MI)
+and L-UMIA (Shejwalkar et al., 2021) (learning-
+based MI). As the MI problem is a binary classifi-
+cation problem, we use accuracy, recall, precision,
+and F1 score following (Hu et al., 2021).
+Data owner and trigger. We study the scenario of
+both single data owners and multiple data owners.
+For the latter case, data owners are forced to have
+different trigger patterns. For the different levels of
+backdoor triggers, we construct the corresponding
+trigger dictionary. Following (Chen et al., 2021b;
+Sun, 2020), we use neutral triggers to avoid nega-
+tively impacting the original model’s utility. Specif-
+ically, we select triggers of English letters and punc-
+tuation marks for the character-level method, e.g.,
+‘a’ and ‘#’. For the word-level method, we use
+the triggers of modal particle, e.g., ‘Ops’. For the
+sentence-level method, we have select triggers of
+1https://huggingface.co/datasets
+
+Dataset
+Methods
+Roberta
+Albert-v2
+GPT2
+T5
+GenderBias
+T-SMIA
+33% ± 0%
+33% ± 1%
+33% ± 9%
+33% ± 6%
+L-UMIA
+33% ± 5%
+33% ± 3%
+43% ± 1%
+38% ± 2%
+TextMarker
+100% ± 7%
+79% ± 0%
+100% ± 1%
+79% ± 0%
+IMDB
+T-SMIA
+58% ± 7%
+42% ± 16%
+48% ± 0%
+-
+L-UMIA
+56% ± 0%
+33% ± 0%
+67% ± 1%
+33% ± 0%
+TextMarker
+95% ± 16%
+78% ± 0%
+79% ± 5%
+33% ± 0%
+SST-5
+T-SMIA
+33% ± 0%
+33% ± 0%
+34% ± 0%
+33% ± 40%
+L-UMIA
+57% ± 0%
+33% ± 0%
+52% ± 0%
+33% ± 0%
+TextMarker
+90% ± 1%
+80% ± 8%
+100% ± 6%
+52% ± 0%
+Trec
+T-SMIA
+33% ± 1%
+33% ± 0%
+33% ± 2%
+33% ± 1%
+L-UMIA
+34% ± 14%
+38% ± 11%
+37% ± 14%
+33% ± 0%
+TextMarker
+90% ± 14%
+90% ± 0%
+100% ± 0%
+79% ± 0%
+Table 2: Performance comparison in terms of F1-score (↑) for MI between our method and two MI baselines on
+various datasets and model architectures. For the baselines T-SMIA and L-UMIA, the proportion of true training
+and testing set used for proxy data construction is 50%. For TextMarker, the total marking ratio R is ∼7%.
+(a) Char-level
+(b) Word-level
+(c) Sentence-level
+Figure 2: The sensitivity study of trigger configurations. The dotted lines indicate the ASR threshold for MI. The
+ASR above the threshold indicates a successful MI.
+English idiom, e.g., ‘Less is more’. After choosing
+one trigger from a dictionary, we randomly deter-
+mine the size and location of the trigger location
+and then insert it or replace the original text.
+5.2
+Effectiveness and Efficiency
+We compare our proposed method with the tradi-
+tional MI methods. For each dataset, we select
+50 member users from the training dataset and 50
+non-member users from the testing dataset of the
+target model. Each user randomly selects a trigger
+
+Datasets
+β = 1
+C
+β = Pr[fθ0(xt) = yt]
+Clean Utility
+min(R) ↓
+α∗
+ASR
+Clean Utility
+min(R) ↓
+α∗
+ASR
+Fiction
+80.79
+0.10%
+49.11
+96.47
+81.15
+0.01%
+9.59
+42.22
+Government
+83.80
+0.15%
+49.11
+97.89
+83.81
+0.02%
+39.42
+58.31
+Table 3: The comparison between TextMarker with two different β policies of applying our Sentence-level trigger
+on the natural language inference task (Multi-NLI dataset). Our method is more efficient in conducting MI with
+much less minimum marking ratio min(R).
+among the three types of triggers and the configura-
+tion. Note that each owner has a unique pattern and
+trigger label to avoid causing conflicts in their own
+membership inference purposes. For the learning-
+based MI and the metric-based MI methods, we as-
+sume they can directly access half of the rest of the
+training samples and testing samples of the target
+model. Note that in the previous work (Shejwalkar
+et al., 2021), two traditional MI methods only have
+access to the proxy datasets, which are disjoint
+from the training dataset and the testing dataset of
+the target model. In our setting, the learning-based
+MI and the metric-based MI methods can achieve
+stronger performance than the original ones. Ta-
+ble 2 shows that the proposed method is superior
+to the two existing MI methods, even though they
+can access more raw training data and testing data
+of the target model. One of the explanations be-
+hind the success of our proposed method is that we
+design a “one for one” method, i.e., each user gen-
+erates their own backdoored text, which injects a
+unique backdoor into the target model. Then, each
+user can use a unique trigger to verify the member-
+ship status of their data. In contrast, the learning-
+based and metric-based MI methods are “one for
+all” methods, i.e., they try to learn a single classifier
+or use a single threshold to decide the membership
+status of all users. Thus, they may not generalize
+well and can not conduct MI precisely. For effi-
+ciency, we further demonstrate that TextMarker is
+more sample-efficient than the previous approach
+(Hu et al., 2022) that takes the random guessing
+threshold to compute the boundary ASR. For com-
+parison, we show the minimum marking ratios and
+also the boundary ASR for conducting successful
+MI. Table 3 shows that our threshold policy can be
+∼10× more efficient in marking ratio.
+5.3
+Robustness and Sensitivity
+Robustness analysis. We explore the resilience of
+our method under different strengths of clean fine-
+tuning, a common watermark removal technique
+(Pang et al., 2023). Experiments with additional
+fine-tuning epochs on a leave-out clean training
+subset show that the injected watermark remains
+notably robust (Table 4). The MI F1 score remains
+high, showcasing the method’s resilience despite
+a slight decrease due to "Catastrophic Forgetting."
+Our method demonstrates promising robustness
+against fine-tuning-based watermark removal, indi-
+cating its potential even in adversarial settings.
++ Clean Fine-tuning
+Accuracy (↑)
+Recall (↑)
+Precision (↑)
+F1-score (↑)
+×
+90.0%
+90.0%
+91.7%
+89.9%
++ 30% Dclean
+90.0%
+90.0%
+91.7%
+89.9%
++ 40% Dclean
+83.3%
+83.3%
+87.7%
+82.7%
++ 50% Dclean
+76.7%
+76.7%
+78.8%
+76.3%
+Table 4: The MI Performance of TextMarker against the
+fine-tuning-based watermark removal method.
+Sensitivity analysis. We conduct sensitivity stud-
+ies to investigate the impact of trigger patterns,
+locations, and poison rates on the performance of
+TextMarker. Figure 2 shows that most patterns are
+effective for successful MI, with some exceptions
+like “Aha”. Applying the random location strategy
+generally leads to better performance than fixed
+locations (initial, middle, end). The results also
+demonstrate that when the poisoning rate exceeds
+2%, the data owner can achieve an ASR higher than
+the threshold for all three trigger types.
+6
+Conclusion
+In this paper, we propose TextMarker, a text data
+watermarking approach leveraging backdoor-based
+membership inference for users to identify the
+unauthorized usage of their private text. Our pro-
+posed TextMarker is superior to previous methods,
+with an efficient threshold technique, requiring far
+fewer marking samples to achieve membership in-
+ference. Through extensive experiments, we evalu-
+ate the effectiveness of TextMarker across various
+datasets and model architectures. Despite the ef-
+fectiveness, one of the limitations is that currently
+we only focus on the text classification training
+setting. An important future direction is to adapt
+TextMarker to in-context learning setting.
+
+References
+Yihan Cao, Siyu Li, Yixin Liu, Zhiling Yan, Yutong Dai,
+Philip S Yu, and Lichao Sun. 2023. A comprehensive
+survey of ai-generated content (aigc): A history of
+generative ai from gan to chatgpt. arXiv preprint
+arXiv:2303.04226.
+Nicholas Carlini, Chang Liu, Úlfar Erlingsson, Jernej
+Kos, and Dawn Song. 2019. The secret sharer: Eval-
+uating and testing unintended memorization in neu-
+ral networks. In 28th USENIX Security Symposium
+(USENIX Security 19), pages 267–284.
+Xiaoyi Chen, Ahmed Salem, Michael Backes, Shiqing
+Ma, and Yang Zhang. 2021a. Badnl: Backdoor at-
+tacks against nlp models. In ICML 2021 Workshop
+on Adversarial Machine Learning.
+Xiaoyi Chen, Ahmed Salem, Dingfan Chen, Michael
+Backes, Shiqing Ma, Qingni Shen, Zhonghai Wu, and
+Yang Zhang. 2021b. Badnl: Backdoor attacks against
+nlp models with semantic-preserving improvements.
+In Annual Computer Security Applications Confer-
+ence, pages 554–569.
+Ganesh Del Grosso, Hamid Jalalzai, Georg Pichler,
+Catuscia Palamidessi, and Pablo Piantanida. 2022.
+Leveraging adversarial examples to quantify mem-
+bership information leakage. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 10399–10409.
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2018. Bert: Pre-training of deep
+bidirectional transformers for language understand-
+ing. arXiv preprint arXiv:1810.04805.
+Adel Elmahdy, Huseyin A Inan, and Robert Sim. 2022.
+Privacy leakage in text classification: A data extrac-
+tion approach. arXiv preprint arXiv:2206.04591.
+Leilei Gan, Jiwei Li, Tianwei Zhang, Xiaoya Li, Yuxian
+Meng, Fei Wu, Shangwei Guo, and Chun Fan. 2021.
+Triggerless backdoor attack for nlp tasks with clean
+labels. arXiv preprint arXiv:2111.07970.
+Tianyu Gu, Kang Liu, Brendan Dolan-Gavitt, and Sid-
+dharth Garg. 2019. Badnets: Evaluating backdooring
+attacks on deep neural networks. IEEE Access.
+Lucjan Hanzlik, Yang Zhang, Kathrin Grosse, Ahmed
+Salem, Maximilian Augustin, Michael Backes, and
+Mario Fritz. 2021. Mlcapsule: Guarded offline de-
+ployment of machine learning as a service. In Pro-
+ceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 3300–3309.
+Yang He, Shadi Rahimian, Bernt Schiele, and Mario
+Fritz. 2020. Segmentations-leak: Membership infer-
+ence attacks and defenses in semantic image segmen-
+tation. In European Conference on Computer Vision,
+pages 519–535. Springer.
+Sorami Hisamoto, Matt Post, and Kevin Duh. 2020.
+Membership inference attacks on sequence-to-
+sequence models: Is my data in your machine trans-
+lation system? Transactions of the Association for
+Computational Linguistics, 8:49–63.
+Hongsheng Hu, Zoran Salcic, Gillian Dobbie, Chen
+Jinjun, Lichao Sun, and Xuyun Zhang. 2022. Mem-
+bership inference via backdooring. In Proceedings
+of the Thirty-First International Joint Conference on
+Artificial Intelligence.
+Hongsheng Hu, Zoran Salcic, Lichao Sun, Gillian Dob-
+bie, Philip S Yu, and Xuyun Zhang. 2021. Member-
+ship inference attacks on machine learning: A survey.
+ACM Computing Surveys (CSUR).
+Abhyuday Jagannatha, Bhanu Pratap Singh Rawat, and
+Hong Yu. 2021. Membership inference attack suscep-
+tibility of clinical language models. arXiv preprint
+arXiv:2104.08305.
+Kifleswing. 2023. Elon musk threatens to sue microsoft
+over using twitter data for its a.i.
+John Kirchenbauer,
+Jonas Geiping,
+Yuxin Wen,
+Jonathan Katz, Ian Miers, and Tom Goldstein. 2023.
+A watermark for large language models.
+arXiv
+preprint arXiv:2301.10226.
+Keita Kurita, Paul Michel, and Graham Neubig. 2020.
+Weight poisoning attacks on pre-trained models.
+arXiv preprint arXiv:2004.06660.
+Linyang Li, Demin Song, Xiaonan Li, Jiehang Zeng,
+Ruotian Ma, and Xipeng Qiu. 2021a. Backdoor at-
+tacks on pre-trained models by layerwise weight poi-
+soning. arXiv preprint arXiv:2108.13888.
+Yiming Li, Mingyan Zhu, Xue Yang, Yong Jiang, Tao
+Wei, and Shu-Tao Xia. 2023. Black-box dataset own-
+ership verification via backdoor watermarking. IEEE
+Transactions on Information Forensics and Security.
+Zichao Li, Dheeraj Mekala, Chengyu Dong, and Jingbo
+Shang. 2021b. Bfclass: A backdoor-free text classifi-
+cation framework. arXiv preprint arXiv:2109.10855.
+Hongbin Liu, Jinyuan Jia, Wenjie Qu, and Neil Zhen-
+qiang Gong. 2021. Encodermi: Membership infer-
+ence against pre-trained encoders in contrastive learn-
+ing. In Proceedings of the 2021 ACM SIGSAC Con-
+ference on Computer and Communications Security,
+pages 2081–2095.
+Grégoire Mialon, Roberto Dessì, Maria Lomeli, Christo-
+foros Nalmpantis, Ram Pasunuru, Roberta Raileanu,
+Baptiste Rozière, Timo Schick, Jane Dwivedi-Yu,
+Asli Celikyilmaz, et al. 2023. Augmented language
+models: a survey. arXiv preprint arXiv:2302.07842.
+Shervin Minaee, Nal Kalchbrenner, Erik Cambria, Nar-
+jes Nikzad, Meysam Chenaghlu, and Jianfeng Gao.
+2021. Deep learning–based text classification: a com-
+prehensive review. ACM Computing Surveys (CSUR),
+54(3):1–40.
+
+Fatemehsadat Mireshghallah, Kartik Goyal, Archit
+Uniyal, Taylor Berg-Kirkpatrick, and Reza Shokri.
+2022. Quantifying privacy risks of masked language
+models using membership inference attacks. arXiv
+preprint arXiv:2203.03929.
+Fatemehsadat Mireshghallah, Huseyin A Inan, Marcello
+Hasegawa, Victor Rühle, Taylor Berg-Kirkpatrick,
+and Robert Sim. 2021.
+Privacy regularization:
+Joint privacy-utility optimization in language models.
+arXiv preprint arXiv:2103.07567.
+Eric Mitchell, Yoonho Lee, Alexander Khazatsky,
+Christopher D Manning, and Chelsea Finn. 2023.
+Detectgpt: Zero-shot machine-generated text detec-
+tion using probability curvature.
+arXiv preprint
+arXiv:2301.11305.
+Milad Nasr, Reza Shokri, and Amir Houmansadr.
+2019. Comprehensive privacy analysis of deep learn-
+ing: Passive and active white-box inference attacks
+against centralized and federated learning. In 2019
+IEEE symposium on security and privacy (SP), pages
+739–753. IEEE.
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida,
+Carroll Wainwright, Pamela Mishkin, Chong Zhang,
+Sandhini Agarwal, Katarina Slama, Alex Ray, et al.
+2022. Training language models to follow instruc-
+tions with human feedback.
+Advances in Neural
+Information Processing Systems, 35:27730–27744.
+Lu Pang, Tao Sun, Haibin Ling, and Chao Chen. 2023.
+Backdoor cleansing with unlabeled data. In Pro-
+ceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 12218–12227.
+William Paul, Yinzhi Cao, Miaomiao Zhang, and Phil
+Burlina. 2021. Defending medical image diagnos-
+tics against privacy attacks using generative meth-
+ods: Application to retinal diagnostics. In Clinical
+Image-Based Procedures, Distributed and Collabora-
+tive Learning, Artificial Intelligence for Combating
+COVID-19 and Secure and Privacy-Preserving Ma-
+chine Learning, pages 174–187. Springer.
+Fanchao Qi, Yangyi Chen, Xurui Zhang, Mukai Li,
+Zhiyuan Liu, and Maosong Sun. 2021a.
+Mind
+the style of text!
+adversarial and backdoor at-
+tacks based on text style transfer. arXiv preprint
+arXiv:2110.07139.
+Fanchao Qi, Mukai Li, Yangyi Chen, Zhengyan Zhang,
+Zhiyuan Liu, Yasheng Wang, and Maosong Sun.
+2021b.
+Hidden killer:
+Invisible textual back-
+door attacks with syntactic trigger. arXiv preprint
+arXiv:2105.12400.
+Fanchao Qi, Yuan Yao, Sophia Xu, Zhiyuan Liu, and
+Maosong Sun. 2021c. Turn the combination lock:
+Learnable textual backdoor attacks via word substitu-
+tion. arXiv preprint arXiv:2106.06361.
+Shahbaz Rezaei and Xin Liu. 2021. On the difficulty
+of membership inference attacks. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 7892–7900.
+Ahmed Salem, Yang Zhang, Mathias Humbert, Mario
+Fritz, and Michael Backes. 2019. Ml-leaks: Model
+and data independent membership inference attacks
+and defenses on machine learning models. In NDSS.
+Virat Shejwalkar, Huseyin A Inan, Amir Houmansadr,
+and Robert Sim. 2021. Membership inference attacks
+against nlp classification models. In NeurIPS 2021
+Workshop Privacy in Machine Learning.
+Jiawen Shi, Yixin Liu, Pan Zhou, and Lichao Sun. 2023.
+Badgpt: Exploring security vulnerabilities of chatgpt
+via backdoor attacks to instructgpt. arXiv preprint
+arXiv:2304.12298.
+Reza Shokri, Marco Stronati, Congzheng Song, and Vi-
+taly Shmatikov. 2017. Membership inference attacks
+against machine learning models. In 2017 IEEE sym-
+posium on security and privacy (SP), pages 3–18.
+IEEE.
+Congzheng Song and Ananth Raghunathan. 2020. In-
+formation leakage in embedding models. In Pro-
+ceedings of the 2020 ACM SIGSAC Conference on
+Computer and Communications Security, pages 377–
+390.
+Congzheng Song and Vitaly Shmatikov. 2019. Audit-
+ing data provenance in text-generation models. In
+Proceedings of the 25th ACM SIGKDD International
+Conference on Knowledge Discovery & Data Mining,
+pages 196–206.
+Liwei Song and Prateek Mittal. 2021. Systematic evalu-
+ation of privacy risks of machine learning models. In
+30th USENIX Security Symposium (USENIX Security
+21), pages 2615–2632.
+Lichao Sun. 2020. Natural backdoor attack on text data.
+arXiv preprint arXiv:2006.16176.
+Brandon Vigliarolo. 2023. Reddit will start charging for
+api access to rebuff llms.
+Jun Yan, Vansh Gupta, and Xiang Ren. 2022. Tex-
+tual backdoor attacks with iterative trigger injection.
+arXiv preprint arXiv:2205.12700.
+Wenkai Yang, Yankai Lin, Peng Li, Jie Zhou, and
+Xu Sun. 2021a. Rethinking stealthiness of backdoor
+attack against nlp models. In Proceedings of the 59th
+Annual Meeting of the Association for Computational
+Linguistics and the 11th International Joint Confer-
+ence on Natural Language Processing (Volume 1:
+Long Papers), pages 5543–5557.
+Yunhao Yang, Parham Gohari, and Ufuk Topcu. 2021b.
+On the vulnerability of recurrent neural networks
+to membership inference attacks.
+arXiv preprint
+arXiv:2110.03054.
+Samuel Yeom, Irene Giacomelli, Matt Fredrikson, and
+Somesh Jha. 2018. Privacy risk in machine learning:
+Analyzing the connection to overfitting. In 2018
+IEEE 31st computer security foundations symposium
+(CSF), pages 268–282. IEEE.
+
+Wayne Xin Zhao, Kun Zhou, Junyi Li, Tianyi Tang,
+Xiaolei Wang, Yupeng Hou, Yingqian Min, Beichen
+Zhang, Junjie Zhang, Zican Dong, et al. 2023. A
+survey of large language models.
+arXiv preprint
+arXiv:2303.18223.
+Ce Zhou, Qian Li, Chen Li, Jun Yu, Yixin Liu,
+Guangjing Wang, Kai Zhang, Cheng Ji, Qiben Yan,
+Lifang He, et al. 2023. A comprehensive survey on
+pretrained foundation models: A history from bert to
+chatgpt. arXiv preprint arXiv:2302.09419.

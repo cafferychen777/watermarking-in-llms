@@ -1,0 +1,1422 @@
+Distillation-Resistant Watermarking for Model Protection in NLP
+Xuandong Zhao
+Lei Li
+Yu-Xiang Wang
+University of California, Santa Barbara
+{xuandongzhao,leili,yuxiangw}@cs.ucsb.edu
+Abstract
+How can we protect the intellectual property
+of trained NLP models? Modern NLP models
+are prone to stealing by querying and distill-
+ing from their publicly exposed APIs. How-
+ever, existing protection methods such as wa-
+termarking only work for images but are not
+applicable to text.
+We propose Distillation-
+Resistant Watermarking (DRW), a novel tech-
+nique to protect NLP models from being stolen
+via distillation. DRW protects a model by in-
+jecting watermarks into the victim’s prediction
+probability corresponding to a secret key and
+is able to detect such a key by probing a sus-
+pect model. We prove that a protected model
+still retains the original accuracy within a cer-
+tain bound. We evaluate DRW on a diverse set
+of NLP tasks including text classiﬁcation, part-
+of-speech tagging, and named entity recogni-
+tion. Experiments show that DRW protects the
+original model and detects stealing suspects at
+100% mean average precision for all four tasks
+while the prior method fails on two1.
+1
+Introduction
+Large-scale pre-trained neural models have shown
+great success in NLP tasks (Devlin et al., 2019; Liu
+et al., 2019). Task-speciﬁc NLP models are often
+deployed as web services with pay-per-query APIs
+in business applications. Protecting the intellectual
+property of these cloud deployed models is a crit-
+ical issue in both research and practice. Service
+providers often use authentication mechanism to
+authorize valid accesses. However, while this pre-
+vents clients directly copying a victim model, it
+does not hinder clients from stealing it using dis-
+tillation. Emerging model extraction attacks have
+demonstrated convincingly that most functions of
+the victim API are likely to be stolen with care-
+fully designed queries (Tramèr et al., 2016; Wal-
+lace et al., 2020; Krishna et al., 2020; He et al.,
+1Our
+code
+is
+available
+at
+https://github.com/
+XuandongZhao/DRW
+2021). A model extraction process is often imper-
+ceptible because it queries APIs in the same way as
+a normal user does (Orekondy et al., 2019). In this
+paper, we study the problem of model protection
+for NLP against distillation stealing.
+Little has been done to adapt watermarking to
+identify model infringements in language tasks. Al-
+though a number of defense techniques have been
+proposed to prevent the model extraction for com-
+puter vision, they are not applicable to language
+tasks with discrete tokens. Among them, deep neu-
+ral networks (DNN) watermarking (Szyller et al.,
+2021; Jia et al., 2021) works by embedding a se-
+cret watermark (e.g., logo or signature) into the
+model exploiting the over-parameterization prop-
+erty of DNNs. This procedure leverages a trigger
+set to stamp invisible watermarks on their commer-
+cial models before distributing them to customers.
+When suspicion of model theft arises, model own-
+ers can conduct an ofﬁcial ownership claim with the
+aid of the trigger set. However, these protections all
+focus on the image/audio tasks, since it is easy to
+modify the continuous data. In addition, most wa-
+termarking methods are invasive and fragile. They
+cannot avoid tampering with the training procedure
+in order to embed the watermark. Besides, the wa-
+termarks are outliers of the task distribution so that
+the adversary may not carry the watermark through
+distillation.
+To ﬁll in the gap, we make the ﬁrst attempt to
+protect NLP models from distillation. We pro-
+pose Distillation-Resistant Watermarking (DRW)
+to protect models and detect suspicious stealing.
+Inspired by the idea from CosWM for computer
+vision (Charette et al., 2022), we utilize prediction
+perturbation to embed a secret sinusoidal signal to
+the output of the victim API. To handle discrete
+tokens, we design a technique to randomly project
+tokens to a uniform region within sinusoidal cycles.
+We design watermarking effective for distillation
+with soft labels and with hard-sampled labels. As
+arXiv:2210.03312v2  [cs.CL]  23 Oct 2022
+
+long as the adversary trains the distillation proce-
+dure till convergence, DRW is able to detect the
+watermark signal from the extracted model.
+The advantages of DRW include 1) training inde-
+pendence: it works directly on the trained models
+and can be directly plugged into the ﬁnal output. 2)
+ﬂexibility: it can be applied to both soft-label out-
+put and hard-label output in the black-box setting.
+3) effectiveness: we evaluate the effectiveness of
+DRW and obtain perfect model extraction detection
+accuracy; we also justify the ﬁdelity with a negligi-
+ble side effect on the original classiﬁcation quality.
+4) scalability: the secret keys for the watermark
+are randomly generated on the ﬂy so that we are
+able to provide different watermarks for different
+end-users and verify them.
+The contributions of this paper are as follows:
+• We enhance the concept of model protection
+against model extraction attacks with an em-
+phasis on language applications.
+• We propose DRW, a novel method to inject
+watermarks to the output of the NLP models
+and later to detect if suspects distill from the
+victim.
+• We provide a theoretical guarantee on the pro-
+tected API accuracy — with protection DRW
+does not harm much of original API’s perfor-
+mance.
+• Experiments on four diverse tasks (POS
+Tagging/NER/SST-2/MRPC) verify that DRW
+detects extracted models with 100% mean av-
+erage precision, yet with only a small drop
+(<5%) in original prediction performance.
+2
+Related Work
+Model Extraction Attacks Model extraction at-
+tacks target the conﬁdentiality of ML models and
+aim to imitate the function of a black-box victim
+model (Tramèr et al., 2016; Orekondy et al., 2019;
+Correia-Silva et al., 2018). First, adversaries col-
+lect or synthesize an initially unlabeled substitute
+dataset. Next, they exploit the ability to query the
+victim model APIs for label predictions to annotate
+the substitute dataset. Then, they can train a high-
+performance model utilizing the pseudo-labeled
+dataset. Recently, several works (Krishna et al.,
+2020; Wallace et al., 2020; He et al., 2021) attempt
+to address the model extraction attacks on NLP
+models, e.g. BERT (Devlin et al., 2019) or Google
+Translate.
+Knowledge Distillation Model extraction attacks
+are closely related to knowledge distillation (KD)
+(Hinton et al., 2015), where the adversary acts as
+the student who approximates the behaviors of the
+teacher (victim) model. The student can learn from
+soft labels or hard labels. KD with soft labels has
+been widely applied due to the fact that soft labels
+can carry a lot of useful information (Phuong and
+Lampert, 2019; Zhou et al., 2021).
+Watermarking A digital watermark is an unde-
+tected label embedded in a noise-tolerant signal,
+such as audio, video, or image data. It is designed
+to identify the owner of the signal’s copyright.
+Some works (Uchida et al., 2017; Adi et al., 2018;
+Zhang et al., 2018; Merrer et al., 2019) employ
+watermarks to prevent precise duplication of ma-
+chine learning models. They insert watermarks
+into the parameters of the protected model or con-
+struct backdoor images that activate particular pre-
+dictions. If an adversary exactly copies a protected
+model, a watermark can be used to verify owner-
+ship. However, safeguarding models from model
+extraction attacks is more difﬁcult due to the fact
+that the parameters of the suspect model might be
+vastly different from those of the victim model, and
+the backdoor behavior may not be transferred to the
+suspect model either. Several works (Juuti et al.,
+2019; Szyller et al., 2021; Jia et al., 2021; Charette
+et al., 2022; He et al., 2022) study how to identify
+extracted models that are distilled from the victim
+model. Jia et al. (2021) forces the protected model
+to acquire features for identifying data samples
+taken from authentic and watermarked data. He
+et al. (2022) conducts lexical modiﬁcation as a wa-
+termarking method to protect language generation
+APIs. CosWM (Charette et al., 2022) incorporates
+a watermark as a cosine signal into the output of the
+protected model. Since the cosine signal is difﬁcult
+to eliminate, extracted models trained via distilla-
+tion will continue to have a signiﬁcant watermark
+signal. Nonetheless, CosWM only applies to image
+data and soft distillation. We design multiple new
+techniques to extend CosWM in handling the text
+data with discrete sequence and we provide a theo-
+retical guarantee on the protected API accuracy for
+soft and hard distillations
+3
+Proposed Method: DRW
+3.1
+Overview
+Figure 1 presents an overview of distillation proce-
+dure, watermarking and detection. The main idea
+
+Unlabeled 
+Dataset
+Victim Model API
+Watermark
+Query
+Predictions
+Train
+Adversary
+Extracted Model 
+Pseudo-labeled 
+Dataset
+Victim Model 
+Process of model 
+extraction attack
+Probing 
+Dataset
+The suspect model extracted 
+the victim model!
+Suspect Model 
+Key
+Process of watermark 
+detection
+Key
+Query
+Figure 1: Overview of model extraction attack and watermark detection. The upper panel illustrates that the
+API owner adds a sinusoidal perturbation to the predicted probability distribution before answering end-users.
+The extracted model will convey this periodical signal if the adversary distills the victim model. At the phase
+of watermark detection, as shown in the bottom panel, the owner queries the suspect model and applies Fourier
+transform to the output with a key. Then the designed perturbation can be detected when a peak shows up in the
+frequency domain at fw. The extracted watermark can thus serve as legal evidence and judgment for the ownership
+claim.
+of DRW is to introduce a perturbation to the output
+of a protected model. This designed perturbation
+is transferred onto a suspect model distilled from a
+victim model that remains identiﬁable by probing
+the suspect model.
+Problem Formulation We consider a common
+real-world scenario that the adversary only has
+black-box access to the victim model’s API V.
+There exist two types of output from victim model
+API: soft (real-valued) labels (i.e. probabilities)
+and hard labels. The adversary employs an auxil-
+iary unlabeled dataset to query V. Once the adver-
+sary gains the predictions from the victim model,
+it can train a separate model S from scratch with
+the pseudo-labeled dataset. The adversary may ei-
+ther distill the victim model with hard labels by
+minimizing the cross-entropy loss
+LCE = −
+m
+X
+i=1
+ˆyi log (ˆqi) ,
+(1)
+where ˆqi is the prediction from the stealer’s model
+and ˆy are the pseudo-labels from the victim model;
+or distill from soft labels by minimizing the Kull-
+back–Leibler (KL) divergence loss
+LKL =
+m
+X
+i=1
+ˆyi log
+ ˆyi
+ˆqi
+
+.
+(2)
+3.2
+Watermarking the Victim Models
+DRW dynamically embeds a watermark in re-
+sponse to queries made by an API’s end-user.
+We use a set of variables to represent key K =
+(c∗, fw, vk, vs, M), where c∗∈{1, . . . , m} is the
+target class to embed watermark; fw ∈R is the
+angular frequency; vk ∈Rn is the phase vector;
+vs ∈Rn is the selection vector; M ∈R|D|×n is
+the random token matrix. |D| represents the vocab-
+ulary size, so that every token ID corresponds to
+vector Mi ∈Rn. Following Charette et al. (2022),
+we deﬁne a periodic signal function based on K
+and the input x.
+zc(x) =
+ cos (fwg(vk, x, M)) ,
+c = c∗
+cos (fwg(vk, x, M) + π) ,
+c ̸= c∗
+(3)
+for c ∈{1, . . . , m}, where g(·) ∈[0, 1) is a hash
+function projecting a text representation to a scalar.
+Ideally, the scalar should uniformly distribute span-
+ning multiple cycles.
+Constructing the hash function
+We project ev-
+ery input x into the ﬁxed scalar range to add the si-
+nusoidal perturbation by the hash function g(·). We
+randomly generate the phase vector vk, selection
+vector vs and the token matrix M. Each element
+in {vk, vs} is randomly sampled from a uniform
+distribution over [0, 1). Each element of the matrix
+M is randomly sampled from a standard normal
+distribution Mij ∼N(0, 1). Let Mi ∈Rn de-
+note the i-th row of matrix M, v⊤
+k Mi ∼N(0, n
+3 )
+and v⊤
+s Mi ∼N(0, n
+3 ) (we prove it in Appendix
+A.2). Then we apply probability integral transfor-
+mation to obtain the uniform distribution of the
+
+hash values, where g(vk, x, M) ∼U(0, 1) and
+g(vs, x, M) ∼U(0, 1). We set g(vs, x, M) ≤τ
+to select part of all samples, where τ is the data se-
+lection ratio. When implementing sequence label-
+ing tasks, we use the token ID to fetch the vector in
+matrix M. Similarly, when implementing sentence
+classiﬁcation tasks, we use the ID of the second
+token in the sentence to obtain the vector.
+Next we compute the periodic signal for the vic-
+tim output
+ˆyc =
+
+
+
+
+
+ˆpc,
+g(vs, x, M) > τ
+ˆpc+ε(1+zc(x))
+1+2ε
+,
+c = c∗and g(vs, x, M) ≤τ
+ˆpc+ ε(1+zc(x))
+m−1
+1+2ε
+,
+c ̸= c∗and g(vs, x, M) ≤τ
+(4)
+where ε is the watermark level for the periodic sig-
+nal and ˆpc is the victim model’s prediction before
+watermarking. Since 0 ≤ˆyi ≤1 and Pm
+i=1 ˆyi = 1
+(see proof in Appendix A.3), ˆy is a surrogate for
+softmax output.
+In the soft label setting, the victim model gen-
+erates output ˆy directly; while in the hard label
+setting, the victim model produces the sampling
+hard label, i.e. a one-hot label with probability ˆyi
+for each class i. Intuitively, the hard-label sampled
+output retains the watermark because it is equal to
+ˆy in expectation. Further, we deﬁne the accuracy
+for soft label output, named “argmax soft”, which
+calculates the accuracy of the argmax of soft output
+compared with the true label. Similarly, we deﬁne
+“sampling hard” to describe the output of the victim
+model which is a one-hot vector.
+3.3
+Detecting Watermark from Suspect
+Models
+We ﬁrst create a probing dataset Dp, for which the
+labels are not required. Dp can be drawn from the
+training data of the extracted model since the owner
+is able to store any query sent by a speciﬁc end-user.
+In our setting, we also allow Dp to be drawn from
+other distributions.
+We employ the Lomb-Scargle periodogram
+method (Scargle, 1982) for detecting and charac-
+terizing periodic signals. The Lomb–Scargle peri-
+odogram yields an estimate of the Fourier power
+spectrum P(f) at frequency f in an unevenly sam-
+pled dataset. After getting the power spectrum,
+we evaluate the signal strength by calculating the
+signal-to-noise ratio
+Psignal = 1
+δ
+Z fw+ δ
+2
+fw−δ
+2
+P(f)df
+Pnoise =
+1
+F −δ
+"Z fw−δ
+2
+0
+P(f)df +
+Z F
+fw+ δ
+2
+P(f)df
+#
+Psnr = Psignal /Pnoise ,
+(5)
+where
+δ
+controls
+the
+window
+width
+of
+
+fw −δ
+2, fw + δ
+2
+
+; F is the maximum frequency,
+and fw is the angular frequency embedded into the
+victim model. A higher signal-to-noise ratio Psnr
+indicates a higher peak in the frequency domain.
+4
+Theoretical Analysis
+In this section, we provide theoretical guarantees
+for DRW for both argmax soft output and sampling
+hard output. The analysis assumes the victim is
+calibrated so its soft-predictions are informative.
+We also focus on the binary classiﬁcation task, i.e.,
+m = 2. Generalization to m > 2 is straightforward
+and omitted only to ensure a clean presentation.
+Theorem 1. Without loss of generality, set target
+class c∗= 1, so that ˆp = ˆp1(x), ˆy = ˆy1, z(x) =
+z1(x). Assume ˆp(x) is calibrated, i.e., E[y|ˆp(x) =
+a] = a, ∀0 ≤a ≤1, the argmax soft label of
+the victim model is ˆys = 1{ ˆp(x)+ε(1+z(x))
+1+2ε
+> 0.5}
+and the sampling hard label of the victim output
+is ˆyh ∼Ber( ˆp(x)+ε(1+z(x))
+1+2ε
+). For a ﬁxed vk, given
+that z(x) = cos (fwg(vk, x, M)) ∈[−1, 1] and
+the data selection ratio is set to τ, then DRW
+argmax soft label and sampling hard label satisfy:
+Evk [Acc(Argmax Soft)] ≥Acc(Victim)
+−τ(0.5 + ε)P[0.5 −ε ≤ˆp ≤0.5 + ε], (6)
+Evk [Acc(Sampling Hard)] ≥(1 −τ)Acc(Victim)
++
+τ
+1 + 2εE
+
+2ˆp2 −2ˆp + 1
+
+.
+(7)
+The proof is deferred to Appendix A.1.
+Equation (6) says that, in the soft label setting,
+DRW does not hurt the accuracy too much if the
+watermark level ε is small. Note that only samples
+in which the victim model output lies around 0.5
+(±ε) might be affected by the watermarking. These
+are data points where the victim model is uncertain
+and inaccurate anyway.
+Equation (7) lowerbounds the accuracy of the
+sampled hard labels, which is close to the vanilla
+victim model if τ is small. Observe that if τ =
+1, the accuracy may drop even if the watermark
+
+Model Type
+SST-2 MRPC POS NER
+mAP of detection for soft distillation:
+DeepJudge*
+1.00
+1.00
+0.54
+0.84
+DRW
+1.00
+1.00
+1.00
+1.00
+mAP of detection for hard distillation:
+DeepJudge*
+1.00
+1.00
+0.48
+0.40
+DRW
+1.00
+1.00
+1.00
+1.00
+Performance of the models:
+BERT
+92.9
+86.7
+-
+92.4
+Victim model
+92.8
+87.0
+90.7
+91.3
++argmax soft
+92.5
+86.8
+90.7
+91.3
++sampling hard
+88.4
+85.8
+90.3
+91.0
+Adversary soft
+92.0
+86.2
+89.8
+87.7
+Adversary hard
+91.3
+86.1
+89.7
+87.4
+Table 1: Main results for detection and model perfor-
+mance. We report the mean average precision of the
+model infringements detection for both soft-label dis-
+tillation and hard-label distillation. The baseline is con-
+structed based on the modiﬁcation of DeepJudge. We
+show the results for BERT reported in the original pa-
+per. We report the results of victim model for argmax
+soft and sampling hard.
+magnitude ε = 0 due to the sampling of the output
+label2. Our design of a second random projection
+vs plays an important role here as it allows us to
+control the accuracy drop to any level we desire by
+adjusting τ.
+5
+Experiments
+5.1
+Tasks
+We evaluate the performance of DRW on four
+different tasks. Two are sequence labeling tasks,
+Part-Of-Speech (POS) Tagging and Named Entity
+Recognition (NER); the other two are from GLUE
+(Wang et al., 2018) text classiﬁcation tasks, SST-2
+and MRPC. We choose BERT (Devlin et al., 2019)
+as our model backbone and ﬁne-tune it in different
+tasks.
+Sequence labeling
+We utilize the CoNLL-2003
+dataset (Sang and Meulder, 2003) for POS Tagging
+and NER tasks. The CoNLL-2003 dataset consists
+of news articles from the Reuters RCV1 corpus
+with POS and NER tags. We formulate POS Tag-
+ging and NER as token-level classiﬁcation tasks
+following standard practice. Speciﬁcally, POS Tag-
+ging has 47 classes and NER has 9 classes. We
+2Under the calibration assumption, Acc(V ictim)
+=
+E [ˆp1(ˆp ≥0.5) + (1 −ˆp)1(ˆp < 0.5)], which is strictly big-
+ger than E
+
+2ˆp2 −2ˆp + 1
+ except when ˆp is supported only
+at trivial points {0, 1, 0.5}
+take the token embedding of the last hidden layer
+of BERT (Devlin et al., 2019) as the input to a lin-
+ear layer, which is then used as the classiﬁer over
+the POS/NER label set. The token ID is set as the
+input x for the hash function g(·). F1 score is hired
+for the evaluation metric.
+Text classiﬁcation
+SST-2 is a binary single-
+sentence classiﬁcation task consisting of movie re-
+views with corresponding sentiment (Socher et al.,
+2013). MRPC is a collection of sentence pairs from
+online news with labels suggesting whether the pair
+is semantically equivalent or not (Dolan and Brock-
+ett, 2005). We use the ﬁnal hidden vector of the
+special [CLS] token of BERT as the input to a lin-
+ear layer, which serves as the sentence classiﬁer.
+The ID of the second token in the sentence is set as
+the input x for the hash function g(·). Since GLUE
+does not include any test dataset, we use accuracy
+of the validation set as the evaluation metric.
+For each task, we train the protected model to
+achieve the best performance on the validation set.
+As demonstrated in Table 1, the victim model has
+comparable performance to BERT (Devlin et al.,
+2019). For soft and hard label distillation, we split
+the training data in each task into two parts and
+use the ﬁrst half to query the victim model. Then
+the extracted model is trained for 20 epochs on the
+pseudo-labeled dataset. We choose the same key
+K = (c∗, fw, vk, vs, M), where frequency fw =
+16.0, watermark level ε = 0.2 and {vk, vs, M} are
+generated with different random seed. We set target
+class c∗= 22 (“NNP” tag) for POS Tagging, c∗=
+2 (“I-PER” tag) for NER and c∗= 0 (“negative”
+class) for SST-2/MRPC. We set data selection ratio
+τ = 0.5 to add watermarks to half of the output
+data. More details for the experiment setting can
+be found in Appendix A.4.
+Baseline
+We take the state-of-the-art method
+DeepJudge (Chen et al., 2022) as a baseline against
+DRW. DeepJudge quantitatively tests the similari-
+ties between the victim model and suspect model,
+then determines whether the suspect model is a
+copy based on the testing metrics. Since Deep-
+Judge is designed for continuous signals such as
+images and audio, we modify the method to apply
+it to texts. We consider the black-box setting for
+DeepJudge, and compute Jensen-Shanon Distance
+(JSD) (Fuglede and Topsøe, 2004) for the prob-
+ing dataset of the victim model and the extracted
+model. JSD measures the similarity of two prob-
+
+SST-2
+MRPC
+POS
+NER
+DeepJudge-JSD-Soft:
+Negative Suspect
+(0.012, 0.032)
+(0.009, 0.161)
+(0.016, 0.444)
+(0.001, 0.416)
+Positive Suspect
+(0.001, 0.002)
+(0.001, 0.002)
+(0.087, 0.279)
+(0.002, 0.201)
+DeepJudge-JSD-Hard:
+Negative Suspect
+(0.013, 0.029)
+(0.008, 0.154)
+(0.010, 0.432)
+(0.009, 0.274)
+Positive Suspect
+(0.004, 0.005)
+(0.003, 0.007)
+(0.029, 0.112)
+(0.011, 0.052)
+DRW-Psnr-Soft:
+Negative Suspect
+(0.008, 4.775)
+(0.128, 2.607)
+(0.012, 2.309)
+(0.105, 4.243)
+Positive Suspect
+(18.82, 25.77)
+(17.81, 24.25)
+(20.59, 28.73)
+(17.25, 25.22)
+DRW-Psnr-Hard:
+Negative Suspect
+(0.011, 4.235)
+(0.012, 3.678)
+(0.182, 2.869)
+(0.203, 4.183)
+Positive Suspect
+(16.38, 22.77)
+(16.70, 21.80)
+(16.23, 25.67)
+(16.19, 25.49)
+Table 2: The probing results for DeepJudge and DRW in soft distillation and hard distillation settings. We present
+the range of JSD and Psnr. The ﬁrst value in parentheses is the minimum score and the second value is the
+maximum score. A larger gap in score between the negative and positive suspect models indicates that the detection
+method performs better in identifying the extracted model.
+Figure 2: Examples of DRW in NER task. The left panel of each sub-ﬁgure plots the output of the target class c∗
+for the victim model and the extracted model (ˆyc∗vs. g(x)). The right panel of each sub-ﬁgure plots the power
+spectrum value for output of the extracted model(P(f) vs. f). We also display the Psnr value for signal strength of
+the extracted model.
+ability distributions. We use the probing dataset
+to query both the victim model and the suspect
+model, and then calculate JSD of the output layer
+as follows
+JSD (ˆy, ˆq) =
+1
+2|Dp|
+X
+x∈Dp
+K (ˆy(x), u) + K (ˆq(x), u)
+where u = (ˆy(x) + ˆp(x)) /2 and K(·, ·) is the
+Kullback-Leibler divergence. A small JSD value
+implies similar output distribution of the two mod-
+els, which further indicates that the suspect model
+may be distilled from the victim model.
+Evaluation
+We evaluate the performance of the
+victim model and the extracted model with accu-
+racy/F1 score. In order to compare DRW with
+DeepJudge in detecting extracted models, we can
+reduce this binary classiﬁcation problem to thresh-
+olding a particular test score. Since DRW and
+DeepJudge use different scores to detect the ex-
+tracted model, we set up a series of ranking tasks to
+show the effect of these scores. For each task, we
+train 10 extracted models from the watermarked
+victim model with different random initialization
+as positive samples, 10 extracted models from the
+unwatermarked victim model with different ran-
+dom initialization, and 10 models from scratch
+with true labels as negative samples. For DRW,
+we use the watermark signal strength values Psnr
+as the score for ranking (identifying whether it is
+an extracted model); for DeepJudge, we use JSD
+as the score. Next, we compute the mean average
+precision (mAP) for the ranking tasks which as-
+sesses the model extraction detection performance.
+A higher mAP means the detecting method can
+distinguish the victim and the suspect model better.
+We show the experiment results in the following
+
+subsections.
+5.2
+Effectiveness: Is DRW able to identify
+model infringements?
+We evaluate our method in two settings, distillation
+with soft labels and distillation with hard labels.
+The results are displayed in Table 1. DeepJudge
+performs well on SST-2 and MRPC tasks but it can
+not effectively detect the extracted models in POS
+Tagging and NER tasks. In contrast, our method
+can successfully detect the extraction with 100%
+mAP across all tasks in both settings. We also
+present the range of JSD and Psnr in Table 2. Re-
+garding the performance of DeepJudge on POS
+Tagging and NER tasks, the JSD intervals for pos-
+itive and negative samples overlap each other, re-
+sulting in the aforementioned lower mAP compared
+to DRW. A case in point is DeepJudge-JSD-Hard
+for NER task, where the ranges for negative suspect
+score and positive suspect score are [0.009, 0.274]
+and [0.011, 0.052] respectively. The overlapping
+intervals lead to the imperfect detection result, i.e.,
+mAP = 0.40. Whereas, DRW is able to perfectly
+distinguish between positive and negative suspects.
+Typically, Psnr for the negative suspect is smaller
+than 5 while that for the positive suspect is larger
+than 15.
+5.3
+Fidelity: Does DRW decrease the
+performance of the model?
+The results for the model performance at the wa-
+termark level ε = 0.2 are displayed in Table 1.
+The perturbed API (victim model with argmax
+soft/sampling hard) only has a slight performance
+drop (within 5%) in comparison to the original one
+due to the trade-off between detection effectiveness
+and model performance. For the victim model API,
+argmax soft exhibits less performance drop than the
+sampling hard, since the argmax of the soft label re-
+mains unchanged with small perturbation. For the
+extracted model, distillation with soft label tends to
+have a better accuracy/F1 score than that with hard
+label. Additionally, the performances of extracted
+models are very close to those of victim models, a
+clear manifestation of the distillation success.
+5.4
+Case Study
+We present how our method works on some ex-
+amples in NER task. We ﬁx the victim model
+and choose different settings for the suspect model
+across all the examples. For the watermarked ones,
+we set fw = 16, ε = 0.2 and c∗= 2.
+In Figure 2 (a), we show how DRW works on
+a suspect model that does not extract the victim
+model. We select a model trained from scratch
+with true labels as a negative example. There is no
+sinusoidal signal in the output of the suspect model
+hence a small Psnr.
+In Figure 2 (b)(c), we illustrate the effect on
+soft distillation and hard distillation. We use the
+watermark key K to extract the output of the victim
+model and suspect model. The extracted model
+clearly follows the victim model and there is a
+prominent peak at frequency fw. Note that suspect
+model distillation with soft labels has a higher Psnr
+than the one with hard labels. This is because the
+training process of extracted models can be more
+effective and faster with soft labels (Phuong and
+Lampert, 2019).
+In Figure 2 (d), we validate the secrecy of our
+method. If the adversary does not have the secret
+key, it can not justify what the watermark is or
+whether there exist watermarks. The output of
+the victim model and extracted model are almost
+indiscernible when we use a wrong key to project
+them given the hash function g(·).
+In Figure 2 (e)(f), we demonstrate the generality
+of our method. Watermarking algorithm should be
+independent of the dataset and the ML algorithms.
+In sub-ﬁgure (e), a different dataset is used to probe
+the suspect model. To be speciﬁc, we select the sec-
+ond half of the training data as the probing dataset,
+rather than the ﬁrst half used in previous experi-
+ments. The results imply that DRW turns out to
+work well when we use unseen data to produce the
+probing dataset for the suspect model. In sub-ﬁgure
+(f), we choose a different backbone RoBERTa (Liu
+et al., 2019) for the suspect model, in which the
+victim model continues to be the BERT model. The
+high peak in the power spectrum at frequency fw
+reveals that DRW is still able to detect the signal.
+6
+Ablation Study
+6.1
+Does watermark level impact detection?
+An important aspect of watermarking is how much
+perturbation we add to the output of the victim
+model. Theoretically, a smaller watermark level is
+associated with a higher accuracy/F1 score of the
+victim, yet it makes it harder to extract the signal
+from the probing results. We conduct two exper-
+iments to investigate the effect of the watermark
+level.
+In the ﬁrst experiment, we vary the watermark
+
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+Watermark Level: 
+80
+82
+84
+86
+88
+90
+92
+API Test Accuracy
+Victim Model
+Victim Argmax Soft
+Victim Sampling Hard
+Figure 3: Test accuracy of victim model API with dif-
+ferent watermark level in SST-2 task.
+level in SST-2 task. According to the Theorem 1,
+the accuracy of the victim model output is bounded
+and a higher watermark level causes poorer perfor-
+mance. As shown in Figure 3, when the watermark
+level rises from 0 to 0.7, the performance drops by
+around 10 percent. It is worth noting that a big drop
+of the argmax soft emerges as ε passes 0.5, which
+means the argmax of the output is highly likely to
+be changed in this case.
+0.02
+0.04
+0.06
+0.08
+0.10
+0.12
+0.14
+0.16
+0.18
+0.20
+Watermark Level: 
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1.0
+mAP of detection
+Distillation with Soft Label
+Distillation with Hard Label
+Figure 4: Model detection results with different water-
+mark level in NER task.
+In the second experiment, we design 10 sets of
+ranking tasks, and build up 10 positive samples
+together with 20 negative samples (similar to the
+setting in Section 5.1) for each set in NER task.
+The watermark level is the only varied parameter
+across different tasks, ranging from 0.02 to 0.2. We
+plot the mAP of the detection against the water-
+mark level in Figure 4. When the watermark level
+ε is below 0.12, DRW can not generate perfect de-
+tection of positive and negative suspects, indicating
+that the adversary may not convey a strong sinu-
+soidal signal at a low watermark level. In this case,
+DRW can not extract the watermark in frequency
+space and thus fails to detect it successfully.
+These two experiments demonstrate the trade-off
+between the detection effectiveness and the victim
+model’s performance after watermarking.
+6.2
+Do categories affect watermark
+protection?
+DT
+NNP
+VBN
+JJ
+Category
+0
+5
+10
+15
+20
+Signal-to-noise Ratio: Psnr
+Distillation with Soft Label
+Distillation with Hard Label
+Figure 5: Adding watermark to four categories in POS
+Tagging task. "DT": determiner; "NNP": proper noun,
+singular; "VBN": verb, past practice; "JJ": adjective.
+We vary the target class c∗of the watermark
+key K in POS Tagging task. We add watermarks to
+four different categories and then train the extracted
+model by soft distillation and hard distillation. The
+results of the signal-to-noise ratio Psnr are visual-
+ized in Figure 5. The effect of the watermark will
+be more salient if the category involves more sam-
+ples. Since "NNP" covers the most (14.16%) of
+all tokens, adding watermark to "NNP" produces
+the strongest signal. In contrast, the determiners
+("DT") category only has a few number of types,
+such as "the" and "a". As a result, adding water-
+mark to "DT" is ineffective as it is hard to add a
+periodic signal to a very discrete domain.
+6.3
+How much should be selected for
+watermarking?
+0.2
+0.4
+0.6
+0.8
+1.0
+Data Selection Ratio: 
+85.0
+85.5
+86.0
+86.5
+87.0
+API Test Accuracy
+Victim Model
+Victim Argmax Soft
+Victim Sampling Hard
+0.2
+0.4
+0.6
+0.8
+1.0
+Data Selection Ratio: 
+0
+5
+10
+15
+20
+Signal-to-noise Ratio: Psnr
+Distillation with Soft Label
+Distillation with Hard Label
+Figure 6: Output accuracy of the victim model and sig-
+nal strength of the extracted model with different data
+selection ratio τ in MRPC task.
+A critical design of our method is that we apply
+selection vector vs to select a portion of the victim
+model output to be watermarked. We change the
+ratio of the watermarked data by tuning the data
+
+selection ratio τ in MRPC task. The results shown
+in Figure 6 indicate that the accuracy of the victim
+model output falls with a higher data selection ratio,
+yet it introduces a greater signal strength of the
+extracted model. This trade-off is similar to the one
+described in Section 6.1. 0.5 could be a reasonable
+selection ratio.
+7
+Conclusion
+In this work, we propose Distillation-Resistant
+Watermarking (DRW), a novel and uniﬁed water-
+marking technique against model extraction attacks
+on NLP models. By injecting watermarks into the
+prediction output of the victim model, the model
+owner can detect the watermark if the adversary dis-
+tills the protected model. We prove the theoretical
+guarantee of DRW and show remarkable empirical
+results on text classiﬁcation and sequence labeling
+tasks.
+Limitations
+1) The watermark detection does not work well
+when the watermarked data covers only a small
+amount of the whole training data for the extracted
+model. 2) Our method may not work well when the
+adversary only makes a few queries to the victim
+model APIs and trains the extracted model with
+few-shot learning. 3) If the victim model outputs
+soft labels, even with watermarking, the adversary
+can take argmax operation to erase the watermark.
+So it is better to combine watermarks with hard
+label output in real-world applications.
+Broader Impact
+This work will alleviate ethical concerns of com-
+mercial NLP models. This paper provides one
+promising solution to an important aspect of NLP:
+how to protect the intellectual property of trained
+NLP models. Companies with NLP web services
+can apply our method to protect their models from
+model extraction attacks.
+Acknowledgements
+XZ was supported by UCSB Chancellor’s Fellow-
+ship. The authors would like to thank Yang Gao for
+polishing up the draft and Dan Qiao for the helpful
+discussion.
+References
+Yossi Adi, Carsten Baum, Moustapha Cissé, Benny
+Pinkas, and Joseph Keshet. 2018.
+Turning your
+weakness into a strength: Watermarking deep neu-
+ral networks by backdooring. In USENIX Security.
+Laurent Charette, Lingyang Chu, Yizhou Chen, Jian
+Pei, Lanjun Wang, and Yong Zhang. 2022. Cosine
+model watermarking against ensemble distillation.
+AAAI.
+Jialuo Chen, Jingyi Wang, Tinglan Peng, Youcheng
+Sun, Peng Cheng, Shouling Ji, Xingjun Ma, Bo Li,
+and Dawn Song. 2022. Copy, right? a testing frame-
+work for copyright protection of deep learning mod-
+els. In IEEE Symposium on Security and Privacy
+(SP).
+Jacson Rodrigues Correia-Silva, Rodrigo F Berriel,
+Claudine Badue, Alberto F de Souza, and Thi-
+ago Oliveira-Santos. 2018. Copycat cnn: Stealing
+knowledge by persuading confession with random
+non-labeled data. In 2018 International Joint Con-
+ference on Neural Networks (IJCNN), pages 1–8.
+IEEE.
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019.
+BERT: Pre-training of
+deep bidirectional transformers for language under-
+standing. In NAACL.
+William B. Dolan and Chris Brockett. 2005. Automati-
+cally constructing a corpus of sentential paraphrases.
+In IJCNLP.
+Bent Fuglede and Flemming Topsøe. 2004.
+Jensen-
+shannon divergence and hilbert space embedding.
+ISIT.
+Xuanli He, L. Lyu, Qiongkai Xu, and Lichao Sun.
+2021. Model extraction and adversarial transferabil-
+ity, your bert is vulnerable! In NAACL.
+Xuanli He, Qiongkai Xu, L. Lyu, Fangzhao Wu, and
+Chenguang Wang. 2022.
+Protecting intellectual
+property of language generation apis with lexical wa-
+termark. AAAI.
+Geoffrey E. Hinton, Oriol Vinyals, and Jeffrey Dean.
+2015. Distilling the knowledge in a neural network.
+ArXiv, abs/1503.02531.
+Hengrui Jia, Christopher A Choquette-Choo, Varun
+Chandrasekaran, and Nicolas Papernot. 2021. En-
+tangled watermarks as a defense against model ex-
+traction. In USENIX Security.
+Mika Juuti, Sebastian Szyller, Alexey Dmitrenko,
+Samuel Marchal, and N. Asokan. 2019. Prada: Pro-
+tecting against dnn model stealing attacks.
+2019
+IEEE European Symposium on Security and Privacy
+(EuroS&P), pages 512–527.
+Diederik P. Kingma and Jimmy Ba. 2015.
+Adam:
+A method for stochastic optimization.
+CoRR,
+abs/1412.6980.
+
+Kalpesh Krishna, Gaurav Singh Tomar, Ankur P
+Parikh, Nicolas Papernot, and Mohit Iyyer. 2020.
+Thieves on sesame street! model extraction of bert-
+based apis. In ICLR.
+Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-
+dar Joshi, Danqi Chen, Omer Levy, Mike Lewis,
+Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+RoBERTa: A robustly optimized BERT pretraining
+approach. arXiv preprint arXiv:1907.11692.
+Ilya Loshchilov and Frank Hutter. 2019.
+Decoupled
+weight decay regularization. In ICLR.
+Erwan Le Merrer, Patrick Pérez, and Gilles Trédan.
+2019. Adversarial frontier stitching for remote neu-
+ral network watermarking. Neural Computing and
+Applications, 32:9233–9244.
+Tribhuvanesh Orekondy, Bernt Schiele, and Mario
+Fritz. 2019. Knockoff nets: Stealing functionality
+of black-box models. In CVPR.
+Mary Phuong and Christoph Lampert. 2019. Towards
+understanding knowledge distillation. In ICML.
+Erik Tjong Kim Sang and Fien De Meulder. 2003. In-
+troduction to the conll-2003 shared task: Language-
+independent named entity recognition. In CoNLL.
+Jeffrey D. Scargle. 1982. Studies in astronomical time
+series analysis. ii - statistical aspects of spectral anal-
+ysis of unevenly spaced data.
+The Astrophysical
+Journal, 263:835–853.
+Richard Socher, Alex Perelygin, Jean Wu, Jason
+Chuang, Christopher D. Manning, A. Ng, and
+Christopher Potts. 2013.
+Recursive deep models
+for semantic compositionality over a sentiment tree-
+bank. In EMNLP.
+Sebastian Szyller, Buse Gul Atli, Samuel Marchal, and
+N. Asokan. 2021. Dawn: Dynamic adversarial wa-
+termarking of neural networks. Proceedings of the
+29th ACM International Conference on Multimedia.
+Florian Tramèr, Fan Zhang, Ari Juels, Michael K.
+Reiter, and Thomas Ristenpart. 2016.
+Stealing
+machine learning models via prediction apis.
+In
+USENIX Security.
+Yusuke Uchida, Yuki Nagai, Shigeyuki Sakazawa, and
+Shin’ichi Satoh. 2017. Embedding watermarks into
+deep neural networks.
+Proceedings of the 2017
+ACM on International Conference on Multimedia
+Retrieval.
+Eric Wallace, Mitchell Stern, and Dawn Xiaodong
+Song. 2020.
+Imitation attacks and defenses for
+black-box machine translation systems. In EMNLP.
+Alex Wang, Amanpreet Singh, Julian Michael, Felix
+Hill, Omer Levy, and Samuel R. Bowman. 2018.
+Glue: A multi-task benchmark and analysis plat-
+form for natural language understanding. In Black-
+boxNLP@EMNLP.
+Jialong Zhang, Zhongshu Gu, Jiyong Jang, Hui Wu,
+Marc Ph. Stoecklin, Heqing Huang, and Ian Molloy.
+2018. Protecting intellectual property of deep neu-
+ral networks with watermarking. Proceedings of the
+2018 on Asia Conference on Computer and Commu-
+nications Security.
+Helong Zhou, Liangchen Song, Jiajie Chen, Ye Zhou,
+Guoli Wang, Junsong Yuan, and Qian Zhang. 2021.
+Rethinking soft labels for knowledge distillation: A
+bias-variance tradeoff perspective. In ICLR.
+
+A
+Appendix
+A.1
+Proof for the Theorem 1
+Theorem A.1 (Restate Theorem 1). Without loss
+of generality, set target class c∗= 1, so that
+ˆp = ˆp1(x), ˆy = ˆy1, z(x) = z1(x). Assume ˆp(x)
+is calibrated, i.e., E[y|ˆp(x) = a] = a, ∀0 ≤
+a ≤1, the argmax soft label of the victim model
+is ˆys = 1{ ˆp(x)+ε(1+z(x))
+1+2ε
+> 0.5} and the sam-
+pling hard label of the victim output is ˆyh ∼
+Ber( ˆp(x)+ε(1+z(x))
+1+2ε
+). For a ﬁxed vk, given that
+z(x) = cos (fwg(vk, x, M)) ∈[−1, 1] and the
+data selection ratio is set to τ, then DRW argmax
+soft label and sampling hard label satisfy:
+Evk [Acc(Argmax Soft)] ≥Acc(Victim)
+−τ(0.5 + ε)P[0.5 −ε ≤ˆp ≤0.5 + ε], (8)
+Evk [Acc(Sampling Hard)] ≥(1 −τ)Acc(Victim)
++
+τ
+1 + 2εE
+
+2ˆp2 −2ˆp + 1
+
+.
+(9)
+Proof. We ﬁrst prove the argmax soft label case
+with τ = 1.
+E [1(ˆys = y)]
+=E [P(ˆys = y|x)]
+=E [P(ˆys = 1, y = 1|x) + P(ˆys = 0, y = 0|x)]
+=E [P(ˆys = 1|x)P(y = 1|x)
++ P(ˆys = 0|x)P(y = 0|x)]
+=E [1{ˆp + εz(x) > 0.5}P(y = 1|x)
++ 1{ˆp + εz(x) ≤0.5} (1 −P(y = 1|x))]
+=E
+
+E [1{ˆp + εz(x) > 0.5}P(y = 1|x)
++ 1{ˆp + εz(x) ≤0.5} (1 −P(y = 1|x)) |ˆp]
+
+≥E
+
+E [1{ˆp −ε > 0.5}P(y = 1|x)|ˆp]
++ E [1{ˆp + ε ≤0.5}(1 −P(y = 1|x))|ˆp]
+
+=E
+
+1{ˆp −ε > 0.5}E [P(y = 1|x)|ˆp]
++ 1{ˆp + ε ≤0.5}E [1 −P(y = 1|x)|ˆp]
+
+=E
+
+1{ˆp > 0.5 + ε}ˆp + 1{ˆp ≤0.5 −ε}(1 −ˆp)
+
+= E [1{ˆp > 0.5}ˆp + 1{ˆp ≤0.5}(1 −ˆp)]
+|
+{z
+}
+Accuracy of victim model without watermark
+−E [1{0.5 < ˆp ≤0.5 + ε}ˆp]
++ E [1{0.5 −ε ≤ˆp ≤0.5}(1 −ˆp)]
+≥Acc(Victim Model)
+−(0.5 + ε)P(0.5 −ε ≤ˆp ≤0.5 + ε)
+where the ﬁrst "≥" follows from |z(x)| ≤1;
+the third "=" follows from the conditional in-
+dependence of ˆys and y given x; the seventh
+"=" follows from the calibration assumption, i.e.
+E [P(y = 1|x)|ˆp(x)] = ˆp(x).
+Notice that over the distribution of vs selects
+every unique x with probability τ independently to
+everything else, by exchanging the order of expecta-
+tion, it is easy to prove that the expected accuracy is
+a convex combination of the accuracy of the victim
+model (with weight 1−τ) and the case above (with
+weight τ). This completes the proof for argmax
+soft label.
+We then start by analyzing the sampling hard
+label case with τ = 1.
+E [1(ˆy = y)]
+=E [P(ˆy = y|x)]
+=E [P(ˆy = 1, y = 1|x) + P(ˆy = 0, y = 0|x)]
+=E [E(ˆy|x)E(y|x) + E(1 −ˆy|x)E(1 −y|x)]
+=E
+
+ˆp
+1 + 2ε + ε(1 + z(x))
+1 + 2ε
+
+E(y|x)
++
+ 1 −ˆp
+1 + 2ε + ε(1 −z(x))
+1 + 2ε
+
+E(1 −y|x)
+
+=
+1
+1 + 2ε E [ˆpE(y|x) + (1 −ˆp)E(1 −y|x)]
+|
+{z
+}
+A
++
+ε
+1 + 2ε E [(1 + z(x))E(y|x) + (1 −z(x))E(1 −y|x)]
+|
+{z
+}
+B
+A =E [E [ˆpE(y|x) + (1 −ˆp)E(1 −y|x)|ˆp]]
+=E [ˆpE(y|ˆp) + (1 −ˆp)E(1 −y|ˆp)]
+=E
+
+ˆp2 + (1 −ˆp)2
+=E
+
+2ˆp2 −2ˆp + 1
+
+where the third line follows from the calibration
+assumption, i.e., E[y|ˆp(x) = a] = a.
+B =E [E(y|x) + E(y|x)z(x) + 1 −z(x)
+−E(y|x) + E(y|x)z(x)]
+=1 + E [(2E(y|x) −1) z(x)]
+≥0
+where the last line follows from the facts that
+|z(x)| ≤1 and |2E(y|x) −1| ≤1.
+Finally, notice that for each x the probability to
+be chosen to add watermark and to sample the out-
+put is τ independently, thus the expected accuracy
+is the convex combination of the accuracy of the
+victim model and that of the fully watermarked
+model.
+A.2
+Distribution Property
+Lemma 1. Assume v ∼U(0, 1), v ∈Rn and
+x ∼N(0, 1), x ∈Rn, where v and x are both
+
+i.i.d. and independent of each other. Then we have:
+1
+√nv · x ⇝N
+
+0, 1
+3
+
+, n →∞
+Proof. Let ui = vixi, i ∈1, 2, . . . , n. By assump-
+tion, ui are i.i.d.. Clearly, the ﬁrst and second mo-
+ments are bounded, so the claim follows from the
+classical central limit theorem,
+√n¯un =
+Pn
+i=1 ui
+√n
+⇝N
+ µ, σ2
+as n →∞
+where
+µ = E (ui) = E (vixi) = E (vi) E (xi)
+= 0
+σ2 = Var(ui) = E
+ u2
+i
+
+−(E (ui))2
+= E
+ u2
+i
+
+= E
+ v2
+i x2
+i
+
+= E
+ v2
+i
+
+E
+ x2
+i
+
+= 1
+3
+It follows that given large n
+1
+√nv · x ⇝N
+
+0, 1
+3
+
+A.3
+Modiﬁed Softmax Properties
+Lemma 2 (Lemma 1 in (Charette et al., 2022)).
+Let ˆp be the softmax output of a model V, then
+the modiﬁed softmax ˆy, as deﬁned in Equation 4
+satisﬁes 0 ≤ˆyi ≤1 and Pm
+i=1 ˆyi = 1.
+Proof. Notice
+that
+in
+Equation
+4,
+when
+g(vs, x, M) > τ, ˆy = ˆp, so that it satisﬁes
+the property above.
+By the deﬁnition of softmax, for all class c ∈
+{1, . . . , m} we have
+0 ≤ˆpc ≤1, −1 ≤zc(x) ≤1.
+Therefore, when c = c∗, we have
+0 ≤ˆpc + ε (1 + zc(x)) ≤1 + 2ε,
+and then
+0 ≤ˆpc + ε (1 + zc(x))
+1 + 2ε
+≤1.
+When c ̸= c∗, since m ≥2, we have
+0 ≤ˆpc + ε (1 + zc(x))
+m −1
+≤1 +
+2ε
+m −1 ≤1 + 2ε
+and then
+0 ≤
+ˆpc + ε(1+zc(x))
+m−1
+1 + 2ε
+≤1.
+Thus, ˆq satisﬁes 0 ≤ˆyi ≤1.
+To prove Pm
+i=1 ˆyi = 1, we use the fact that zc∗+
+zi̸=c∗= 0 and obtain
+c
+X
+i=1
+ˆyi = ˆpc∗+ ε (1 + zc∗)
+1 + 2ε
++
+X
+i̸=c∗
+ˆpi + ε(1+zi)
+m−1
+1 + 2ε
+=
+m
+X
+i=1
+ˆpi
+1 + 2ε +
+X
+i̸=c∗
+ε (1 + zc∗+ 1 + zi)
+(m −1)(1 + 2ε)
+=
+1
+1 + 2ε +
+2ε
+1 + 2ε
+= 1
+A.4
+Experiment Details
+We provide more details for the experiments in this
+section.
+We build our classiﬁcation models upon
+bert-base-uncased from Hugging Face3. The
+model contains 110M parameters.
+We add a
+dropout layer before the last linear layer with a
+dropout rate of 0.5. We implement DRW in Py-
+Torch 1.11.0 on a server with 4 NVIDIA TITAN-
+Xp GPUs. We set batch size to 8 for SST-2 and
+MRPC tasks, and 32 for POS Tagging and NER
+tasks.
+We train the victim model using AdamW
+(Loshchilov and Hutter, 2019) optimizer with learn-
+ing rate 1e-5 and epsilon 1e-8. Each victim model
+is trained 40 epochs and the one with the best vali-
+dation results is chosen.
+Regarding the extracted model, we use half of
+the training data to query the victim model and ob-
+tain the labeled dataset. Then the extracted model
+is trained with Adam (Kingma and Ba, 2015) opti-
+mizer for 20 epochs with learning rate 5e-5. The
+average training time is 3 minutes for each epoch.
+We show the results for RoBERTa model in Sec-
+tion 5.4. In this setting, we choose roberta-base
+from Hugging Face, which has 125M parameters.
+3https://huggingface.co/

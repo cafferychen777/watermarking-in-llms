@@ -1,0 +1,3285 @@
+WARDEN: Multi-Directional Backdoor Watermarks for
+Embedding-as-a-Service Copyright Protection
+Anudeex Shetty1∗, Yue Teng1∗, Ke He1, Qiongkai Xu1,2†
+1School of Computing and Information System, the University of Melbourne, Australia
+2School of Computing, FSE, Macquarie University, Australia
+{anudeexs,ytten,khhe1}@student.unimelb.edu.au
+qiongkai.xu@mq.edu.au
+Abstract
+Embedding as a Service (EaaS) has become
+a widely adopted solution, which offers fea-
+ture extraction capabilities for addressing var-
+ious downstream tasks in Natural Language
+Processing (NLP). Prior studies have shown
+that EaaS can be prone to model extraction
+attacks; nevertheless, this concern could be mit-
+igated by adding backdoor watermarks to the
+text embeddings and subsequently verifying the
+attack models post-publication. Through the
+analysis of the recent watermarking strategy
+for EaaS, EmbMarker, we design a novel CSE
+(Clustering, Selection, Elimination) attack that
+removes the backdoor watermark while main-
+taining the high utility of embeddings, indicat-
+ing that the previous watermarking approach
+can be breached. In response to this new threat,
+we propose a new protocol to make the removal
+of watermarks more challenging by incorpo-
+rating multiple possible watermark directions.
+Our defense approach, WARDEN, notably in-
+creases the stealthiness of watermarks and has
+been empirically shown to be effective against
+CSE attack.1
+1
+Introduction
+Nowadays, Large Language Models (LLMs), due
+to their vast capacity, have showcased exceptional
+proficiency in comprehending and generating nat-
+ural language and proven effective in many real-
+world applications (Brown et al., 2020; Radford
+et al., 2019). Using them as EaaS in a black-box
+API manner has become one of the most successful
+commercialization paradigms. Consequently, the
+owners of these models, such as OpenAI, Google,
+and Mistral AI, have initiated the provision of EaaS
+to aid users in various NLP tasks. For instance, one
+notable provider, OpenAI (2024), with over 150
+*Equal contributions.
+†Corresponding author.
+1The
+code
+is
+available
+at
+https://github.com/
+anudeex/WARDEN.git.
+million users, recently released more performant,
+cheaper EaaS models.2
+Given the recent success of EaaS, the associated
+vulnerabilities have started to attract attention in
+security and NLP communities (Xu and He, 2023).
+As a primary example, model extraction attack,
+a.k.a. imitation attack, has been proven to be ef-
+fective in stealing the capability of LLMs (Krishna
+et al., 2020; Tramèr et al., 2016; He et al., 2021a).
+To conduct such attacks, the attackers query the vic-
+tim model and then train their own model based on
+the collected data. Attackers usually invest far less
+cost and resources than victim to provide competi-
+tive services, as shown in Figure 1.a. Therefore, it
+is imperative to defend against them, and the most
+popular tactic is to implant statistical signals (or
+watermarks) via backdoor techniques.
+Beyond intellectual property (IP) infringement,
+further vulnerabilities have been exposed, such as
+privacy breaches (He et al., 2022a), more perfor-
+mant surrogate models (Xu et al., 2022), and trans-
+ferable adversarial attacks (He et al., 2021b). As
+a result, backdoor watermarks are added to EaaS
+embeddings enabling post-attack lawsuits because
+the attack models inherit the stealthy watermarks,
+which could be utilized by EaaS providers to iden-
+tify them. The first work of this kind uses a pre-
+determined embedding (vector) as the watermark,
+which is then incorporated into text embeddings in
+proportion to trigger words (Peng et al., 2023), as
+illustrated in Figure 1.b. The primary requirements
+for watermarking methods include: (i) they should
+not lower the quality of the original application,
+and (ii) it should be difficult for malicious users
+to identify or deduce the secret watermark vector
+(Juuti et al., 2019).
+Our first work, CSE attack, challenges the afore-
+mentioned second point. It involves creating a
+2https://platform.openai.com/docs/api-
+reference/embeddings/
+1
+arXiv:2403.01472v2  [cs.CR]  9 Jun 2024
+
+CSE Module
+Original 
+Embeddings
+EaaS Providers
+(Victim Models)
+Imitation Attackers
+(Attack Models)
+Copyright 
+Verification
+Verification 
+Dataset
+Queries
+Training 
+Dataset
+(a)
+Non-Watermarked 
+Embeddings
+(d)
+Watermarked 
+Embeddings
+Watermarked Embeddings 
+(w/ multiple keys)
+Train
+Model Extraction Attack 
+(Liu et al., 2022)
+(b)
+EmbMarker 
+(Peng et al., 2023)
+(c)
+CSE Attack 
+(Ours)
+WARDEN Defense
+(Ours)
+No
+No
+Yes
+Target Embeddings
+Augment
+Watermarked Embeddings 
+after CSE attack
+Blue and Purple keys 
+left in embeddings
+Yes
+Copied?
+Target Embeddings
+Red key removed in 
+embeddings
+Figure 1: An overview of recent developments: (a) model extraction attack on EaaS, (b) EmbMarker watermarking
+approach, and contributions from this work: (c) CSE attack and (d) WARDEN defense. CSE attack effectively
+eliminates the watermark (in Red) injected by EmbMarker, as shown in part (c). Whereas, WARDEN adds multiple
+watermarks (in Red, Blue, and Purple), where some of them (Blue and Purple in verification embedding) are missed
+by CSE attack, as illustrated in part (d).
+framework CSE (Clustering, Selection, Elimina-
+tion) that selects the suspected embeddings with
+watermarks by comparing the distortion between
+embedding pairs of the victim model and a bench-
+mark model, then neutralizes the impact of the wa-
+termark on the embeddings, as shown in Figure 1.c.
+Empirical evidence demonstrates that CSE success-
+fully compromises the watermark while preserving
+high embedding utility. To mitigate the effects
+of CSE, our second work introduces WARDEN,
+a multi-directional Watermark Augmentation for
+Robust DEfeNse mechanism, which uses multi-
+ple watermark embeddings to reduce the chance of
+attackers breaching all of them, as depicted in Fig-
+ure 1.d. We notice that WARDEN, even with a lim-
+ited number of watermarks, is successful in coun-
+tering CSE. Moreover, we design a corresponding
+verification protocol to allow every watermark the
+authority to verify copyright violations.
+Our main contributions are as follows:
+• We propose CSE (Clustering, Selection, Elim-
+ination) framework that breaches the recent
+state-of-the-art watermarking technique for
+EaaS, and we conduct extensive experiments
+to evaluate its effectiveness.
+• We design WARDEN to enhance the back-
+door watermarks by considering various wa-
+termark vectors and conditions. Our studies
+suggest that the proposed defense method is
+more robust against CSE and stealthier than
+EmbMarker on various datasets.
+2
+Related Work
+2.1
+Imitation Attacks
+Imitation attacks (Krishna et al., 2020; Orekondy
+et al., 2019; Yue et al., 2021; Wallace et al., 2020)
+duplicate cloud models without access to its inter-
+nal parameters, architecture, or training data. The
+attack involves sending queries to the victim model
+and training a functionally similar surrogate model
+based on API’s responses (Chandrasekaran et al.,
+2020; Tramèr et al., 2016). Liu et al. 2022, showed
+that publicly deployed cloud EaaS APIs are also
+vulnerable to these attacks. It poses a potential
+threat to EaaS providers, as attackers can easily
+extract the deployed model in reduced time and
+with marginal financial investment. More concern-
+ingly, such models can outperform victim models
+(Xu et al., 2022) when involving victim model en-
+semble and domain adaptation. Subsequently, they
+may release a similar API at a lower cost, thereby
+violating IP rights and causing harm to the market.
+2
+
+IBe
+Be
+Watermarked 
+Embedding
+Non-Watermarked 
+Embedding
+Step 1: Clustering
+Standard Embeddings
+Watermarked Embeddings
+Suspected Embeddings
+Cleaned Dataset
+Original Dataset
+Step 2: Selection
+Step 3: Elimination
+𝐶2
+i. Apply SVD 
+𝐶1
+𝐶1
+𝐶2
+𝐶𝑛
+𝐶𝑛
+𝐶1
+𝐶2
+𝐶𝑛
+ii. Eliminate
+contribution from 
+top K components
+Anomaly detection by contrasting 
+watermarked and standard embeddings
+Figure 2: The outline of our proposed CSE, consisting of three incremental steps: (i) clustering, (ii) selection, and
+(iii) elimination. More details are elaborated in Section 3.2.
+2.2
+Backdoor Attacks and Watermarks
+Backdoor attacks (Dai et al., 2019), a significant
+subcategory of adversarial attacks (Alzantot et al.,
+2018; Ebrahimi et al., 2018), involves inserting
+textual triggers into a target model such that the
+victim model behaves normally until the backdoor
+is activated. Recent works (Zhang et al., 2023;
+Chen et al., 2022; Huang et al., 2023) have shown
+that pre-trained LLMs are susceptible to backdoor
+attacks and transferable to downstream tasks.
+Recent research (Li et al., 2022; Tang et al.,
+2023; Peng et al., 2023) has utilized backdoor as
+the essential technology to integrate verifiable wa-
+termark information in deep learning models, espe-
+cially LLMs (Kirchenbauer et al., 2023). The rea-
+son is that other techniques, such as altering model
+parameters (Uchida et al., 2017; Lim et al., 2022),
+need white-box access and are non-transferable in
+model extraction attacks. Similarly, lexical wa-
+termarks (He et al., 2022b,c) do not work on em-
+beddings in the EaaS use case. Drawing inspi-
+ration from backdoor attacks, one can correspond
+EaaS embeddings to a pre-defined watermark when
+trigger conditions are satisfied. One such work,
+EmbMarker (Peng et al., 2023), uses just a single
+embedding and adds this to original embeddings
+linearly as per the number of moderate-frequency
+trigger words. However, it was verified against a
+narrow set of similarity invariant attacks, leaving
+scope for superior attacks and countermeasures.
+3
+Methodology
+In this section, we first present an overview of the
+conventional backdoor watermark framework to
+counter model extraction attacks, then proceed to
+a detailed design of our CSE attack. Next, we
+explain WARDEN, the multi-directional watermark
+extension to the previous watermarking technique.
+3.1
+Preliminary
+Malicious attackers target the EaaS victim service
+Sv, based on victim model Θv, by sending texts t
+as queries to receive corresponding original embed-
+dings eo. Considering the threat of model extrac-
+tion attacks, the victim backdoors original embed-
+ding eo using a watermarking function f to inject
+an additional pre-defined embedding t to return
+provided embedding ep = f(eo, t). Then, the at-
+tack model Θa is trained on ep which is received
+by querying Θv, and the attacker provides a com-
+petitive service Sa based on model Θa. Copyright
+protection is feasible when f adheres to these crite-
+ria: (i) the original EaaS provider should be able to
+query Sa to verify if Θa has imitated Θv; (ii) the
+utility of provided embeddings ep is comparable to
+eo for downstream tasks.
+3.2
+CSE Attack Framework
+This section outlines our Clustering, Selection, and
+Elimination (CSE) attack, as the framework shown
+in Figure 2. This approach aims at (i) identifying
+3
+
+the embedding vectors most likely to contain the
+watermark and (ii) eliminating the influence of the
+watermark while preserving the essential semantics
+within the embeddings.
+Clustering
+We first employ clustering algorithms
+to organize the embeddings in the dataset (which
+attackers have retrieved) into groups. This action
+enhances the subsequent selection step by: (i) im-
+proving the efficiency of calculating pair-wise dis-
+tance within smaller sets of embeddings, and (ii)
+providing distinct groups of poisoned data entries,
+which facilitates the identification of more anoma-
+lous pairs. K-Means algorithm (Arthur et al., 2007)
+is used as the primary clustering approach, while
+we discuss the effectiveness of other clustering
+methods in Appendix C.1. Nevertheless, clustering
+solely is not sufficient for filtering out the water-
+marked embeddings. For instance, we can observe
+from the contour lines in Figure 3 that watermarked
+samples are spread across clusters and inconspicu-
+ous. Furthermore, the centroids of the watermarked
+samples and overall clusters do not coincide. To
+counteract this, we thus propose the selection mod-
+ule to identify the most suspicious embeddings
+with the watermark.
+Figure 3: t-SNE (Van der Maaten and Hinton, 2008)
+visualisation for K-Means clustering (n = 3) of MIND
+dataset, discussed in Section 3.2. Please refer to Ap-
+pendix C.2 for plots of other datasets.
+Selection
+We denote the victim model as Θv
+and introduce another hold-out standard model (or
+benchmark model) as Θs. Within each cluster Ci,
+we conduct pairwise evaluations on the correspond-
+ing embeddings ep (provided embedding) and es
+(standard embedding). Those with distinctive dis-
+tance changes are considered suspected samples.
+0.6
+0.7
+0.8
+0.9
+1.0
+Cosine Sim. w/ Target Embedding
+0
+2
+4
+6
+8
+10
+12
+Density
+Embedding Type
+Unsuspected
+Suspected
+Figure 4: Similarity distribution plot between the target
+embedding and various embedding types. As we can
+see, the suspected embeddings returned by the selection
+module in CSE are distinctly different from unsuspected
+embeddings and more akin to the target embedding. The
+results for other datasets are reported in Appendix B.
+EmbMarker incorporates varying proportions of
+a predetermined target embedding into texts con-
+taining trigger words. Since the predefined tar-
+get embedding lacks shared semantic meaning, we
+hypothesize that the distance between embedding
+pairs, which have notable contributions from water-
+marks, exhibit anomaly behavior (validated in Fig-
+ure 4) compared to corresponding distances derived
+from a standard language model, such as BERT
+(Devlin et al., 2019). Such difference is used to
+reflect the significance of the abnormal rank of wa-
+termarked pairs, as estimated by
+Dp = Rank(Dv) −Rank(Ds),
+(1)
+where Dv and Ds are cosine similarity disparities
+between victim embeddings (i.e., ep1 and ep2) po-
+tentially containing watermark, and the standard
+embeddings 3 (i.e., es1 and es2) probably without
+watermarks. The Rank function indicates the rank
+of the similarity scores by the embedding pairs in
+the set of scores (Dv or Ds). The distinction be-
+tween the suspected and unsuspected embeddings
+is illustrated in Figure 4.
+Elimination
+Given the suspicious embeddings
+that are potentially watermarked from the previ-
+ous step, we hypothesize that the watermark can
+be identified and recovered in suspicious embed-
+dings’ top principal components (validated in Sec-
+tion 4.2) because the target embedding would be
+common among them. Following this idea, we pro-
+pose an elimination algorithm, composed of two
+3We use state-of-the-art SBERT (Reimers and Gurevych,
+2019) embeddings offering benefits in distance measurement.
+4
+
+steps. First, we apply singular value decomposition
+(SVD) (Golub and Reinsch, 1970) to analyze and
+identify the top K principal components. Then,
+the contribution of these components are iteratively
+eliminated using the Gram-Schmidt (GS) process
+(Trefethen and Bau, 1997). The elimination step for
+each principal component vector is demonstrated
+as follows:
+u⟨k+1⟩= e⟨k⟩−Proj(e⟨k⟩, c⟨k⟩).
+(2)
+In the projection function (Perwass et al., 2009),
+e⟨k⟩is projected onto the k-th principal component
+c⟨k⟩, denoted as
+Proj(e⟨k⟩, c⟨k⟩) = c⟨k⟩· e⟨k⟩
+||c⟨k⟩||
+· c⟨k⟩.
+(3)
+Here, e⟨0⟩is initialized with ep. After each iter-
+ation, e⟨k+1⟩is acquired by normalizing u⟨k+1⟩
+such that Norm
+ u⟨k+1⟩
+= u⟨k+1⟩/||u⟨k+1⟩||.
+3.3
+WARDEN Defense Framework
+In response to the successful CSE attack, we
+propose Watermark Augmentation for Robust
+DEfeNse (WARDEN) as a counter measurement,
+which incorporates multiple directions as water-
+marking embeddings.
+Multi-Directional Watermarks
+To diversify the
+possibility of watermark directions (or target em-
+beddings), we introduce multiple watermarks,
+noted as W = {w1, w2, ..., wR}. This strategy
+increases the difficulty of inferring all of them via
+the elimination module in CSE attack. These wa-
+termarks remain confidential on servers and can
+be subject to regular updates. We randomly split
+the trigger words set, T into R independent subsets
+Tr for R watermarks. Then the trigger counting
+function, λr is the frequency of trigger words in
+Tr set with a maximum threshold of m (level of
+watermark). Finally, we add watermarks to the
+original embedding eo for text S to generate the
+corresponding embedding ep as follows:
+Norm
+ 
+(1 −
+R
+X
+r=1
+λr(S)) · eo +
+R
+X
+r=1
+λr(S) · wr
+!
+.
+(4)
+One thing to note is that because we split T for mul-
+tiple watermarks, the proportion of watermarked
+samples is independent of R and is the same as
+in the single watermark case. Due to weight val-
+ues being implicitly normalised λ(S) = λ1(S) +
+λ2(S) + . . . + λR(S), where λ(S) is watermark
+weight used on a single trigger set.
+Multi-Watermark Verification
+We adopt a con-
+servative approach to copyright verification with
+multiple watermarks, i.e., if any watermark confi-
+dently flags IP infringement, we consider it positive.
+Hence, we build verification datasets, backdoor
+texts Dbr and benign text Dn as follows:
+Dbr = {[t1, t2, ..., tm]|ti ∈Tr}, ∀r ∈[1..R],
+Dn = {[t1, t2, ..., tm]|ti /∈T}.
+(5)
+The premise is that embeddings for these back-
+door texts will be closer to their corresponding
+target embedding in contrast to benign texts in the
+case of watermarks. We leverage this behavior
+of embedding backdoors to verify copyright in-
+fringement at each watermark level. We quantify
+the closeness by computing cosine similarity and
+squared L2 distance between target embeddings
+W and embeddings of Dbr and Dn, i.e.,
+cosir =
+ei · wr
+||ei|| · ||wr||,
+l2ir =
+
+
+ei
+||ei|| −
+wr
+||wr||
+
+
+2
+,
+Cbr = {cosir |i ∈Dbr}, Cnr = {cosir |i ∈Dn},
+Lbr = {l2ir|i ∈Dbr}, Lnr = {l2ir|i ∈Dn},
+(6)
+where r ∈[1..R].
+The copyright detection performance is evalu-
+ated by taking the difference of averaged cosine
+similarity and averaged squared L2 distance as per
+Equation 7. Furthermore, we compute the p-valuej
+using the Kolmogorov-Smirnov (KS) test (Berger
+and Zhou, 2014) as the third metric, which com-
+pares these test value distributions. We aim to reject
+the null hypothesis: The two cosine similarity value
+sets Cbr and Cnr are consistent.
+∆cosr =
+1
+|Cbr|
+X
+i∈Cbr
+i −
+1
+|Cnr|
+X
+j∈Cnr
+j,
+∆l2r =
+1
+|Lbr|
+X
+i∈Lbr
+i −
+1
+|Lnr|
+X
+j∈Lnr
+j.
+(7)
+We evaluate these three metrics independently
+for all the watermarks and then combine them,
+∆cos = max
+1≤r≤R ∆cosr,
+∆l2 = min
+1≤r≤R ∆l2r,
+p-value = min
+1≤r≤R p-valuer.
+(8)
+The core idea is that overall infringement can be
+certified by the infringement of any one of the tar-
+get watermarking embeddings.
+5
+
+4
+Experiments
+4.1
+Experimental Settings
+Evaluation Dataset
+To benchmark our attack
+and defense, we employ standard NLP datasets:
+Enron (Metsis et al., 2006), SST2 (Socher et al.,
+2013), AG News (Zhang et al., 2015), and MIND
+(Wu et al., 2020). We use Enron dataset for email
+spam classification. AG News and MIND are news-
+based and used for recommendation and classifica-
+tion tasks. We use SST2 for sentiment classifica-
+tion. The statistics of these datasets are reported in
+Table 1.
+Dataset
+# Train
+# Test
+# Class
+SST2
+67,349
+872
+2
+MIND
+97,791
+32,592
+18
+AG News
+120,000
+7,600
+4
+Enron
+31,716
+2,000
+2
+Table 1: Statistics for classification datasets.
+Evaluation Metrics
+To evaluate different aspects
+of our techniques, we adopt the following metrics:
+• (Downstream) Task Performance We con-
+struct a multi-layer perceptron (MLP) classi-
+fier with the EaaS embeddings as inputs. The
+quality of the embeddings is measured by the
+accuracy and F1-score of the classifiers on the
+downstream tasks.
+• (Reconstruction) Attack Performance We
+measure the closeness of reconstructed target
+embedding(s) (more details in Section 4.2)
+with original target embedding(s) by reporting
+their cosine similarity.
+• (Infringement) Detection Performance Fol-
+lowing previous work (Peng et al., 2023), we
+employ three metrics, i.e., p-value, difference
+of cosine similarity, and difference of squared
+L2 distance. Their customized variations for
+WARDEN are defined in Section 3.3. Our find-
+ings largely rely on this evaluation as it reflects
+the performance in real-world applications.
+Experimental environment
+is detailed in the
+Appendix A.
+4.2
+CSE Experiments
+CSE is designed to assist model extraction at-
+tack bypassing post-publish copyright verification.
+Dataset
+Detection Performance
+p-value
+∆cos(%)
+∆l2(%)
+SST2
+> 0.83
+0.00
+0.01
+MIND
+> 0.57
+0.00
+0.00
+AG News
+> 0.57
+0.09
+-0.18
+Enron
+> 0.17
+0.00
+0.01
+Table 2: Copyright verification can be bypassed when
+the target direction is known and eliminated from the
+provided embeddings.
+Hence, we evaluate whether we are able to bypass
+the copyright verification using the same water-
+mark detection metrics with an opposite objective,
+i.e., lower p-value and the absolute values of ∆
+metrics close to zero.
+Watermark Elimination
+One of the critical el-
+ements in the EmbMarker is the secret target em-
+bedding (w) used for adding the watermark. The
+objective of CSE is to recover and erase this direc-
+tion from the provided embeddings to circumvent
+copyright verification. We show later (see Table 3)
+that such elimination is feasible and does not dete-
+riorate the EaaS quality. To demonstrate that, we
+start with a simplified case where we assume ac-
+cess to this target embedding and directly remove
+this direction. Expectedly, as seen in Table 2, we
+can bypass the copyright verification with mini-
+mal impact on the downstream utility performance.
+Moreover, this validates the importance of the pro-
+jection technique employed in CSE. Additionally,
+this raises another technique’s vulnerability of en-
+suring target embedding is kept secure.
+Watermark Reconstruction
+In a successful at-
+tack, the principal components c⟨k⟩removed from
+the embeddings erase the watermark by recovering
+the target embedding. To validate this conjecture,
+we model and solve an optimization problem as
+defined in Equation 9 where a linear combination
+of c⟨k⟩results in the recovered target embedding
+w. We then calculate cosine similarity to the target
+embedding w. A high cosine similarity demon-
+strates the CSE technique’s effectiveness. For CSE,
+the reconstructed target embedding is extremely
+(99+% cosine similarity) close to the original target
+embedding (more in following Section 4.2),
+min
+ααα
+w −
+K
+X
+k=1
+αk · c⟨k⟩
+
+2
+.
+(9)
+6
+
+Dataset
+Method
+Task Performance
+Detection Performance
+ACC.(%)
+F1-score
+p-value ↑
+∆cos(%) ↓
+∆l2(%) ↑
+SST2
+Original
+93.42±0.13
+93.42±0.13
+> 0.47
+-0.18±0.22
+0.37±0.43
+EmbMarker
+93.12±0.12
+93.12±0.12
+< 10−3
+3.56±0.50
+-7.11±1.01
+EmbMarker + CSE
+90.46±0.98
+90.46±0.98
+> 0.04
+0.99±0.40
+-1.97±0.80
+MIND
+Original
+77.22±0.13
+51.37±0.31
+> 0.26
+-0.69±0.17
+1.37±0.35
+EmbMarker
+77.19±0.09
+51.40±0.16
+< 10−6
+4.69±0.17
+-9.37±0.33
+EmbMarker + CSE
+75.51±0.16
+50.35±0.46
+> 0.21
+0.55±0.18
+-1.10±0.37
+AG News
+Original
+93.64±0.11
+93.64±0.11
+> 0.36
+0.56±0.24
+-1.13±0.48
+EmbMarker
+93.52±0.11
+93.52± 0.11
+< 10−9
+12.76±0.43
+-25.52±0.87
+EmbMarker + CSE
+92.87±0.32
+92.87±0.32
+> 0.22
+0.27±0.30
+-0.55±0.60
+Enron
+Original
+94.73±0.14
+94.73±0.14
+> 0.20
+-0.38±0.38
+0.76±0.75
+EmbMarker
+94.61±0.28
+94.61±0.28
+< 10−6
+5.93±0.28
+-11.86±0.56
+EmbMarker + CSE
+95.56±0.21
+95.56±0.21
+> 0.62
+0.59±0.33
+-1.17±0.65
+Table 3: The performance of CSE for different scenarios on SST2, MIND, AG News, and Enron datasets. ‘Original’
+represents a benign victim model, ‘EmbMarker’ stands for the existing watermarking technique, and ‘EmbMarker +
+CSE’ is the case where CSE is performed on provided embeddings by EmbMarker before doing model extraction
+(as shown in Figure 1.c). ↑denotes higher metrics are better and ↓denotes lower metrics are better from the
+attacker’s objective.
+Dataset
+Task Performance
+Detection Performance
+ACC.(%)
+F1-score
+p-value
+∆cos(%)
+∆l2(%)
+SST2
+87.04
+87.01
+> 0.05
+0.19
+-0.39
+MIND
+74.80
+50.57
+> 0.08
+1.09
+-2.19
+AG News
+93.04
+93.04
+> 0.01
+-2.14
+4.29
+Enron
+95.45
+95.45
+> 0.17
+-1.28
+2.57
+Table 4: CSE on a non-watermarked victim model,
+with minimal degradation in downstream utility and
+copyright detection metrics of an innocent model.
+Effectiveness Evaluation
+In Table 3, CSE along
+with model extraction attack is proved effective in
+removing the influence from EmbMarker. Detec-
+tion performance dropped to almost the original
+case, which indicates the EaaS provider will not be
+able to detect the imitation attack performed by the
+attacker. In addition, for SST2, MIND, AG News
+datasets, the downstream performance dropped 1-
+2%, which demonstrates the attack preserves the
+embeddings utility. We skip attack performance in
+the Table 3 as they all have (almost) full watermark
+reconstruction. However, we discuss this in Sec-
+tion 4.3 where we observe varying values due to
+the ineffectiveness of CSE attack against WARDEN
+defense.
+Ablation Study
+An attacker will not be aware
+whether the model they are trying to imitate is wa-
+termarked. Table 4 shows that our attack leads to
+only minor quality degradation for such scenarios,
+demonstrating the suitability of CSE. We perform
+further extensive quantitative and qualitative sensi-
+tivity study to investigate how other factors (such as
+algorithms, parameters, and models) affect the effi-
+cacy of our suggested CSE attack in Appendix C.
+4.3
+WARDEN Experiments
+2
+3
+4
+5
+10
+Number of Watermark (R)
+70
+75
+80
+85
+90
+Task Performance (Accuracy)
+92.75
+93.30
+93.26
+93.23
+92.34
+Accuracy
+↑p-value (log10)
+↑∆Cos
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+1.88
+4.35
+1.13
+1.46
+2.50
+4.64
+4.08
+6.52
+3.06
+6.49
+Figure 5: The impact of the number of watermarks (R)
+in WARDEN for SST2 dataset.
+Watermarking Performance of WARDEN
+We
+illustrate the efficiency of employing multiple wa-
+termarks in Figure 5, which demonstrates the out-
+standing performance (yellow and green line up-
+ward trend) of WARDEN with increasing R and
+7
+
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+0.85
+0.63
+3.16
+1.41
+1.44
+0.12
+5.36
+1.99
+4.82
+2.82
+2
+3
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+90.00
+99.21
+88.42
+98.67
+88.81
+98.08
+89.27
+96.56
+90.44
+94.87
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+Figure 6: The impact of the number of watermarks (R)
+in WARDEN against CSE on SST2 dataset. Note: ‘Re-
+con. Cos. Sim.’ (the Red line) represents the minimum
+reconstructed cosine similarity among all possible wa-
+termarks in W .
+marginal degradation (blue line) in the downstream
+utility. The results on other datasets also show sim-
+ilar patterns which can be found in Appendix D.1.
+WARDEN against CSE
+Now, we investigate the
+effectiveness of WARDEN against CSE (shown in
+Figure 6). As observed in the previous section,
+WARDEN is stealthier with increasing watermarks.
+As expected, the performance of CSE diminishes,
+correlating with decreasing attack performance (red
+line). Due to the usage of more watermarks, there
+is a natural increase in the likelihood that one of
+them will detect an infringement. Moreover, in
+extreme scenarios, a mixture of multiple target em-
+beddings will substitute the watermarked samples
+(Equation 4), reducing the impact of the CSE at-
+tack’s exploitation of the semantic distortion in the
+embeddings.
+Gram-Schmidt Extension
+To further strengthen
+WARDEN, we investigate the application of the
+Gram-Schmidt (GS) process (Trefethen and Bau,
+1997) on target embeddings W , as we assume the
+orthogonal set of watermark embeddings are more
+distinguishable to each other. In our experiments,
+as reported in Figure 7, the detection performance
+is stronger after GS selection. In addition, due to
+orthogonality, the reconstructed target embedding
+cosine similarities will be significantly lower, indi-
+cating CSE might also be ineffective. We observe
+the same from the corresponding ablation study in
+Appendix D.1.
+2
+3
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+95
+100
+Task Performance (Accuracy)
+93.12
+93.00
+93.35
+93.00
+93.58
+Accuracy
+↑p-value (log10)
+↑∆Cos
+10
+15
+20
+25
+30
+35
+40
+45
+50
+Detection Performance (∆Cos & p-value (log10))
+12.74
+9.24
+12.90
+10.84
+27.57
+10.84
+20.21
+10.84
+49.76
+10.84
+Figure 7: The impact of GS extension on WARDEN for
+SST2 dataset. The observations are in line with normal
+WARDEN (Figure 6) results with the only difference
+being stronger metrics.
+Ablation Study
+Similar to the experiments for
+CSE, we perform WARDEN on non-watermarked
+models. Due to our strict verification, for the high
+value of R, the p-value could be noisy. It is be-
+cause the verification process might find closeness
+due to genuine semantics instead of backdoors as a
+result of a high pool of watermark directions. This
+could lead to false positives, i.e., incorrectly clas-
+sifying models as copied. However, in such cases,
+we observe that other detection metrics (∆based)
+metrics are reliable, which should aid the entity
+in making appropriate decisions (refer Figure 18).
+We conduct a further detailed ablation study dis-
+secting the WARDEN components and showing its
+stealthiness in Appendix D.
+5
+Conclusion
+In this paper, we first demonstrate that our new CSE
+attack can bypass the recent EaaS watermarking
+technique. CSE cleanses the watermarked dataset
+by clustering them first, then selecting embedding
+pairs with disparity, and finally eliminating their
+top principal components, while maintaining the
+service utility. To remedy this shortcoming, we pro-
+pose a simple yet effective watermarking method,
+WARDEN, which augments the previous approach
+by introducing multiple watermarks to embeddings.
+Our intensive experiments show that WARDEN is
+superior in verifying the copyright of EaaS from
+prior works. Furthermore, WARDEN is also effec-
+tive against potent CSE, which shows its resilience
+to different attacks. We also conduct detailed ab-
+8
+
+lation studies to verify the importance of every
+component of CSE and WARDEN. Future studies
+may consider exploring watermark ownership un-
+der multi-owner service settings.
+Limitations
+We test our WARDEN defense against CSE attack,
+acknowledging that various other attacks might
+overcome the uni-directional watermark approach.
+Although publishing the WARDEN algorithm to
+the public may inspire future attacks against it, we
+do not foresee it to be a trivial task, as the capabil-
+ity of WARDEN can be enhanced by using more
+conservative strategies, e.g., more stealthy trigger
+patterns and watermarking techniques.
+We also know that by having access to the
+ground-truth watermarking vectors, combined with
+the GS process, one can eliminate the WARDEN
+watermarks, as discussed in Appendix D.3. How-
+ever, it is the service provider’s responsibility to
+maintain the confidentiality of their watermarking
+keys.
+We also note the false positive of the p-value for
+non-watermarked models when a large number of
+watermark vectors are augmented (Figure 18), even
+though other metrics rectify this incorrect signal.
+We suggest service providers conduct a prelimi-
+nary study to select the number of watermarks for
+WARDEN. In this regard, the current work is an em-
+pirical observation study, and theoretical analysis
+might help decide the optimal number of water-
+marks. In future, we will endeavour to investigate
+advanced watermarking mechanisms focusing on
+defence purposes.
+Social Impact
+We developed a CSE attack, which could aid at-
+tackers in circumventing EaaS IP infringements.
+We agree that with CSE, any existing system using
+EmbMarker is vulnerable. Yet, we argue that it is
+critical to show the possibility of such attacks and
+make users aware of them. The usual first step in
+security is to first expose the vulnerability. Addi-
+tionally, to mitigate the aforementioned threat, we
+contribute an improved watermarking technique,
+WARDEN, which could be incorporated with mini-
+mal effort.
+Acknowledgements
+We would like to appreciate the valuable feedback
+from all anonymous reviewers. This research was
+supported by The University of Melbourne’s Re-
+search Computing Services and the Petascale Cam-
+pus Initiative. Qiongkai Xu would like to express
+his gratitude to the FSE Staff Travel Scheme and
+FSE DDRI grant for the support in both travel and
+research. Anudeex Shetty would like to express
+his gratitude to Newman College for the support in
+travel and research.
+References
+Moustafa Alzantot, Yash Sharma, Ahmed Elgohary,
+Bo-Jhang Ho, Mani Srivastava, and Kai-Wei Chang.
+2018. Generating natural language adversarial ex-
+amples. In Proceedings of the 2018 Conference on
+Empirical Methods in Natural Language Processing,
+pages 2890–2896, Brussels, Belgium. Association
+for Computational Linguistics.
+David Arthur, Sergei Vassilvitskii, et al. 2007.
+k-
+means++: The advantages of careful seeding. In
+Soda, volume 7, pages 1027–1035.
+Vance W. Berger and YanYan Zhou. 2014.
+Kol-
+mogorov–Smirnov Test: Overview. John Wiley &
+Sons, Ltd.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+Gretchen Krueger, Tom Henighan, Rewon Child,
+Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens
+Winter, Chris Hesse, Mark Chen, Eric Sigler, Ma-
+teusz Litwin, Scott Gray, Benjamin Chess, Jack
+Clark, Christopher Berner, Sam McCandlish, Alec
+Radford, Ilya Sutskever, and Dario Amodei. 2020.
+Language models are few-shot learners.
+In Ad-
+vances in Neural Information Processing Systems,
+volume 33, pages 1877–1901. Curran Associates,
+Inc.
+Varun Chandrasekaran, Kamalika Chaudhuri, Irene Gia-
+comelli, Somesh Jha, and Songbai Yan. 2020. Explor-
+ing connections between active learning and model
+extraction.
+In Proceedings of the 29th USENIX
+Conference on Security Symposium, SEC’20, USA.
+USENIX Association.
+Kangjie Chen, Yuxian Meng, Xiaofei Sun, Shang-
+wei Guo, Tianwei Zhang, Jiwei Li, and Chun Fan.
+2022. Badpre: Task-agnostic backdoor attacks to
+pre-trained NLP foundation models. In International
+Conference on Learning Representations.
+Jiazhu Dai, Chuanshuai Chen, and Yufeng Li. 2019. A
+backdoor attack against lstm-based text classification
+systems. IEEE Access, 7:138872–138878.
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. BERT: Pre-training of
+deep bidirectional transformers for language under-
+standing. In Proceedings of the 2019 Conference of
+9
+
+the North American Chapter of the Association for
+Computational Linguistics: Human Language Tech-
+nologies, Volume 1 (Long and Short Papers), pages
+4171–4186, Minneapolis, Minnesota. Association for
+Computational Linguistics.
+Javid Ebrahimi, Anyi Rao, Daniel Lowd, and Dejing
+Dou. 2018. HotFlip: White-box adversarial exam-
+ples for text classification. In Proceedings of the 56th
+Annual Meeting of the Association for Computational
+Linguistics (Volume 2: Short Papers), pages 31–36,
+Melbourne, Australia. Association for Computational
+Linguistics.
+G. H. Golub and C. Reinsch. 1970. Singular value
+decomposition and least squares solutions. Numer.
+Math., 14(5):403–420.
+Xuanli He, Lingjuan Lyu, Chen Chen, and Qiongkai Xu.
+2022a. Extracted BERT model leaks more informa-
+tion than you think! In Proceedings of the 2022 Con-
+ference on Empirical Methods in Natural Language
+Processing, pages 1530–1537, Abu Dhabi, United
+Arab Emirates. Association for Computational Lin-
+guistics.
+Xuanli He, Lingjuan Lyu, Lichao Sun, and Qiongkai
+Xu. 2021a. Model extraction and adversarial trans-
+ferability, your BERT is vulnerable! In Proceedings
+of the 2021 Conference of the North American Chap-
+ter of the Association for Computational Linguistics:
+Human Language Technologies, pages 2006–2012,
+Online. Association for Computational Linguistics.
+Xuanli He, Lingjuan Lyu, Lichao Sun, and Qiongkai
+Xu. 2021b. Model extraction and adversarial trans-
+ferability, your BERT is vulnerable! In Proceedings
+of the 2021 Conference of the North American Chap-
+ter of the Association for Computational Linguistics:
+Human Language Technologies, pages 2006–2012,
+Online. Association for Computational Linguistics.
+Xuanli He, Qiongkai Xu, Lingjuan Lyu, Fangzhao Wu,
+and Chenguang Wang. 2022b. Protecting intellectual
+property of language generation apis with lexical
+watermark. Proceedings of the AAAI Conference on
+Artificial Intelligence, 36(10):10758–10766.
+Xuanli He, Qiongkai Xu, Yi Zeng, Lingjuan Lyu,
+Fangzhao Wu, Jiwei Li, and Ruoxi Jia. 2022c.
+CATER: Intellectual property protection on text gen-
+eration APIs via conditional watermarks.
+In Ad-
+vances in Neural Information Processing Systems.
+Yujin Huang, Terry Yue Zhuo, Qiongkai Xu, Han
+Hu, Xingliang Yuan, and Chunyang Chen. 2023.
+Training-free lexical backdoor attacks on language
+models. In Proceedings of the ACM Web Conference
+2023, pages 2198–2208.
+Mika Juuti, Sebastian Szyller, Samuel Marchal, and
+N Asokan. 2019.
+Prada: protecting against dnn
+model stealing attacks. In 2019 IEEE European Sym-
+posium on Security and Privacy (EuroS&P), pages
+512–527. IEEE.
+John Kirchenbauer,
+Jonas Geiping,
+Yuxin Wen,
+Jonathan Katz, Ian Miers, and Tom Goldstein. 2023.
+A watermark for large language models. In Inter-
+national Conference on Machine Learning, pages
+17061–17084. PMLR.
+Kalpesh Krishna, Gaurav Singh Tomar, Ankur P. Parikh,
+Nicolas Papernot, and Mohit Iyyer. 2020. Thieves
+on sesame street! model extraction of bert-based
+apis. In 8th International Conference on Learning
+Representations, ICLR 2020, Addis Ababa, Ethiopia,
+April 26-30, 2020. OpenReview.net.
+Yiming Li, Yang Bai, Yong Jiang, Yong Yang, Shu-Tao
+Xia, and Bo Li. 2022. Untargeted backdoor water-
+mark: Towards harmless and stealthy dataset copy-
+right protection. In Advances in Neural Information
+Processing Systems.
+Jian Han Lim, Chee Seng Chan, Kam Woh Ng, Lixin
+Fan, and Qiang Yang. 2022. Protect, show, attend and
+tell: Empowering image captioning models with own-
+ership protection. Pattern Recognition, 122:108285.
+Yupei Liu, Jinyuan Jia, Hongbin Liu, and Neil Zhen-
+qiang Gong. 2022.
+Stolenencoder: Stealing pre-
+trained encoders in self-supervised learning. In CCS
+2022 - Proceedings of the 2022 ACM SIGSAC Con-
+ference on Computer and Communications Security,
+Proceedings of the ACM Conference on Computer
+and Communications Security, pages 2115–2128. As-
+sociation for Computing Machinery.
+Ilya Loshchilov and Frank Hutter. 2019. Decoupled
+weight decay regularization. In International Confer-
+ence on Learning Representations.
+Stephen Merity, Caiming Xiong, James Bradbury, and
+Richard Socher. 2016. Pointer sentinel mixture mod-
+els. In ICLR.
+Vangelis Metsis, Ion Androutsopoulos, and Georgios
+Paliouras. 2006. Spam filtering with naive bayes-
+which naive bayes?
+In CEAS, volume 17, pages
+28–69. Mountain View, CA.
+OpenAI. 2024. New embedding models and API up-
+dates — openai.com. https://openai.com/blog/
+new-embedding-models-and-api-updates. [Ac-
+cessed 02-02-2024].
+Tribhuvanesh Orekondy, Bernt Schiele, and Mario Fritz.
+2019. Knockoff nets: Stealing functionality of black-
+box models. In 2019 IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition (CVPR), pages
+4949–4958.
+F. Pedregosa, G. Varoquaux, A. Gramfort, V. Michel,
+B. Thirion, O. Grisel, M. Blondel, P. Prettenhofer,
+R. Weiss, V. Dubourg, J. Vanderplas, A. Passos,
+D. Cournapeau, M. Brucher, M. Perrot, and E. Duch-
+esnay. 2011.
+Scikit-learn: Machine learning in
+Python.
+Journal of Machine Learning Research,
+12:2825–2830.
+10
+
+Wenjun Peng, Jingwei Yi, Fangzhao Wu, Shangxi Wu,
+Bin Bin Zhu, Lingjuan Lyu, Binxing Jiao, Tong Xu,
+Guangzhong Sun, and Xing Xie. 2023. Are you
+copying my model? protecting the copyright of large
+language models for EaaS via backdoor watermark.
+In Proceedings of the 61st Annual Meeting of the
+Association for Computational Linguistics (Volume
+1: Long Papers), pages 7653–7668, Toronto, Canada.
+Association for Computational Linguistics.
+Christian Perwass, Herbert Edelsbrunner, Leif Kobbelt,
+and Konrad Polthier. 2009. Geometric algebra with
+applications in engineering, volume 4. Springer.
+Alec Radford, Jeffrey Wu, Rewon Child, David Luan,
+Dario Amodei, Ilya Sutskever, et al. 2019. Language
+models are unsupervised multitask learners. OpenAI
+blog, 1(8):9.
+Nils Reimers and Iryna Gurevych. 2019.
+Sentence-
+BERT: Sentence embeddings using Siamese BERT-
+networks. In Proceedings of the 2019 Conference on
+Empirical Methods in Natural Language Processing
+and the 9th International Joint Conference on Natu-
+ral Language Processing (EMNLP-IJCNLP), pages
+3982–3992, Hong Kong, China. Association for Com-
+putational Linguistics.
+Douglas A Reynolds et al. 2009. Gaussian mixture
+models. Encyclopedia of biometrics, 741(659-663).
+Richard Socher, Alex Perelygin, Jean Wu, Jason
+Chuang, Christopher D. Manning, Andrew Ng, and
+Christopher Potts. 2013. Recursive deep models for
+semantic compositionality over a sentiment treebank.
+In Proceedings of the 2013 Conference on Empiri-
+cal Methods in Natural Language Processing, pages
+1631–1642, Seattle, Washington, USA. Association
+for Computational Linguistics.
+Yuanmin Tang, Jing Yu, Keke Gai, Xiangyan Qu, Yue
+Hu, Gang Xiong, and Qi Wu. 2023. Watermarking
+vision-language pre-trained models for multi-modal
+embedding as a service.
+Florian Tramèr, Fan Zhang, Ari Juels, Michael K. Re-
+iter, and Thomas Ristenpart. 2016. Stealing machine
+learning models via prediction apis. In Proceedings
+of the 25th USENIX Conference on Security Sympo-
+sium, SEC’16, page 601–618, USA. USENIX Asso-
+ciation.
+Lloyd N. Trefethen and David Bau. 1997. Numerical
+Linear Algebra. SIAM.
+Yusuke Uchida, Yuki Nagai, Shigeyuki Sakazawa, and
+Shin’ichi Satoh. 2017. Embedding watermarks into
+deep neural networks. In Proceedings of the 2017
+ACM on International Conference on Multimedia
+Retrieval, ICMR ’17, page 269–277, New York, NY,
+USA. Association for Computing Machinery.
+Laurens Van der Maaten and Geoffrey Hinton. 2008.
+Visualizing data using t-sne. Journal of machine
+learning research, 9(11).
+Eric Wallace, Mitchell Stern, and Dawn Xiaodong Song.
+2020. Imitation attacks and defenses for black-box
+machine translation systems. In Conference on Em-
+pirical Methods in Natural Language Processing.
+Thomas Wolf, Lysandre Debut, Victor Sanh, Julien
+Chaumond, Clement Delangue, Anthony Moi, Pier-
+ric Cistac, Tim Rault, Remi Louf, Morgan Funtow-
+icz, Joe Davison, Sam Shleifer, Patrick von Platen,
+Clara Ma, Yacine Jernite, Julien Plu, Canwen Xu,
+Teven Le Scao, Sylvain Gugger, Mariama Drame,
+Quentin Lhoest, and Alexander Rush. 2020. Trans-
+formers: State-of-the-art natural language processing.
+In Proceedings of the 2020 Conference on Empirical
+Methods in Natural Language Processing: System
+Demonstrations, pages 38–45, Online. Association
+for Computational Linguistics.
+Fangzhao Wu, Ying Qiao, Jiun-Hung Chen, Chuhan
+Wu, Tao Qi, Jianxun Lian, Danyang Liu, Xing Xie,
+Jianfeng Gao, Winnie Wu, and Ming Zhou. 2020.
+MIND: A large-scale dataset for news recommenda-
+tion. In Proceedings of the 58th Annual Meeting of
+the Association for Computational Linguistics, pages
+3597–3606, Online. Association for Computational
+Linguistics.
+Qiongkai Xu and Xuanli He. 2023. Security challenges
+in natural language processing models. In Proceed-
+ings of the 2023 Conference on Empirical Methods
+in Natural Language Processing: Tutorial Abstracts,
+pages 7–12, Singapore. Association for Computa-
+tional Linguistics.
+Qiongkai Xu, Xuanli He, Lingjuan Lyu, Lizhen Qu,
+and Gholamreza Haffari. 2022. Student surpasses
+teacher: Imitation attack for black-box NLP APIs. In
+Proceedings of the 29th International Conference
+on Computational Linguistics, pages 2849–2860,
+Gyeongju, Republic of Korea. International Com-
+mittee on Computational Linguistics.
+Zhenrui Yue, Zhankui He, Huimin Zeng, and Julian
+McAuley. 2021. Black-box attacks on sequential
+recommenders via data-free model extraction. In
+Proceedings of the 15th ACM Conference on Recom-
+mender Systems, RecSys ’21, page 44–54, New York,
+NY, USA. Association for Computing Machinery.
+Xiang Zhang, Junbo Zhao, and Yann LeCun. 2015.
+Character-level convolutional networks for text clas-
+sification. In Proceedings of the 28th International
+Conference on Neural Information Processing Sys-
+tems - Volume 1, NIPS’15, page 649–657, Cambridge,
+MA, USA. MIT Press.
+Zhengyan Zhang, Guangxuan Xiao, Yongwei Li, Tian
+Lv, Fanchao Qi, Zhiyuan Liu, Yasheng Wang, Xin
+Jiang, and Maosong Sun. 2023. Red alarm for pre-
+trained models: Universal vulnerability to neuron-
+level backdoor attacks.
+Machine Intelligence Re-
+search, 20(2):180–193.
+11
+
+Appendix
+A
+Experimental Settings
+We leverage the standard codebase of the Trans-
+formers (Wolf et al., 2020) library and AdamW
+(Loshchilov and Hutter, 2019) algorithm for model
+training and development. Likewise, we use scikit-
+learn (Pedregosa et al., 2011) for clustering algo-
+rithms and other utility calculations. We use GPT-3
+text-embedding-002 API as original benign embed-
+dings and the BERT (Devlin et al., 2019) model as
+the victim model. We perform all the experiments
+on a single A100 GPU with CUDA 11.7 and py-
+torch 2.1.2. We assume that both the victim model
+and imitators use the same datasets to separate the
+effects of the watermarking technique from other
+factors. Furthermore, we assume that the extracted
+model is trained only using the watermarked out-
+puts from the victim model. Finally, we implement
+the EmbMarker and other experiments following
+their default configurations and settings, i.e., m =
+4, n = 20, and frequency interval = [0.5%, 1%].
+The only exception is the R = 10 case in WAR-
+DEN, where we use n = 50 to have enough trigger
+words. A standard dataset, WikiText (Merity et al.,
+2016) consisting of 1, 801, 350 entries, serves as a
+hold-out dataset for selecting moderate-frequency
+words as watermark triggers (T).
+B
+Similarity Distribution Plots
+The observations (captured in Figure 8) for other
+datasets are similar to SST2 as seen in Figure 4,
+i.e., watermarked embeddings are closer to target
+embedding, and there is a clear difference in simi-
+larities for watermarked and non-watermarked em-
+beddings. Due to skewness between the number of
+suspected and unsuspected embeddings, we employ
+sampling for unsuspected entries in these plots.
+C
+CSE Attack Analyses
+In this section, we perform detailed ablation studies
+for CSE attack.
+C.1
+Comparison of Clustering Algorithms
+The previous experiments utilize K-Means as the
+clustering algorithm. However, alternative algo-
+rithms such as Gaussian Mixture Models (GMM)
+(Reynolds et al., 2009) are also valid options. The
+subsequent table, Table 5, illustrates the compar-
+ative performance between K-Means and GMM.
+While K-Means exhibits superior performance
+Dataset
+Detection Performance
+p-value
+∆cos(%)
+∆l2(%)
+SST2
+> 0.02
+1.00±0.40
+-2.00±0.80
+MIND
+> 0.55
+0.28±0.31
+-0.55±0.63
+AG News
+> 0.10
+0.45±0.42
+-0.90±0.84
+Enron
+> 0.56
+0.23±0.52
+-0.47±1.04
+Table 5: CSE performance using GMM clustering al-
+gorithm, similar to K-Means algorithm (tabulated in
+Table 3).
+in downstream utility for AG News, Enron, and
+MIND datasets, it is less confident for delta val-
+ues in the case of Enron and MIND. Overall both
+algorithms demonstrate satisfactory performance,
+suggesting that the clustering module for CSE is
+universally adaptable to different clustering algo-
+rithms.
+C.2
+Number of Clusters (n)
+We can see from Figure 9 that there is no significant
+role in the number of clusters (n). In all the cases,
+CSE attack is successful, though we use n = 20 in
+our experiments. However, considering pairwise
+distance comparison, it is preferable to have fewer
+clusters to increase the likelihood of watermarked
+pairs. We also visualize these clusters in Figure 10.
+C.3
+Number of Principal Components (K)
+In Section 4.2, we formulated an optimization prob-
+lem to compute how much of the watermark we are
+recovering for a given number of principal compo-
+nents (ck). As expected, with increasing K, we will
+recover more of the target embeddings, as noted
+from the red line in Figure 11. However, the utility
+metrics deteriorate more significantly (blue line).
+Meanwhile, a lower K does not recover enough
+target embedding to bypass copyright verification
+(yellow and green lines – detection performance).
+To achieve the best of both worlds—downstream
+utility and avoiding watermark—we must strike
+a balance, and 50 components seem appropriate.
+Further, in some cases, we observe that the increas-
+ing K does not affect the downstream utility met-
+rics. The downstream task’s simplicity could be the
+cause of this. For example, Enron dataset is a bi-
+nary classification task wherein required data could
+be represented in a few embedding dimensions.
+12
+
+0.7
+0.8
+0.9
+1.0
+Cosine Sim. w/ Target Embedding
+0
+2
+4
+6
+8
+10
+12
+Density
+Embedding Type
+Unsuspected
+Suspected
+(a) SST2
+0.6
+0.7
+0.8
+0.9
+1.0
+Cosine Sim. w/ Target Embedding
+0
+2
+4
+6
+8
+10
+12
+Density
+(b) MIND
+0.65
+0.70
+0.75
+0.80
+0.85
+0.90
+0.95
+1.00
+Cosine Sim. w/ Target Embedding
+0
+5
+10
+15
+20
+Density
+(c) AG News
+0.6
+0.7
+0.8
+0.9
+1.0
+Cosine Sim. w/ Target Embedding
+0
+2
+4
+6
+8
+Density
+(d) Enron
+Figure 8: Distribution plots for cosine similarities between different types of embeddings and the target embedding
+for different datasets.
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+0.93
+2.95
+0.84
+2.40
+0.45
+0.76
+0.48
+1.91
+0.65
+1.91
+10
+15
+20
+50
+100
+Number of Clusters (N)
+50
+60
+70
+80
+90
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+90.94
+99.68
+89.68
+99.68
+91.97
+99.65
+90.48
+99.70
+90.48
+99.72
+Accuracy
+Recon. Cos. Sim.
+↓p-value (log10)
+↓∆Cos
+(a) SST2
+−2
+0
+2
+4
+6
+Detection Performance (∆Cos & p-value (log10))
+1.07
+1.09
+0.77
+1.47
+0.70
+1.47
+0.79
+0.76
+-0.37
+0.47
+10
+15
+20
+50
+100
+Number of Clusters (N)
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+75.37
+98.99
+75.19
+99.26
+75.72
+99.31
+75.29
+99.27
+75.13
+99.30
+Accuracy
+Recon. Cos. Sim.
+↓p-value (log10)
+↓∆Cos
+(b) MIND
+0
+1
+2
+3
+4
+5
+6
+7
+Detection Performance (∆Cos & p-value (log10))
+0.47
+2.95
+0.51
+1.47
+0.30
+0.76
+0.31
+0.76
+0.50
+3.57
+10
+15
+20
+50
+100
+Number of Clusters (N)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+92.89
+99.92
+93.01
+99.92
+92.34
+99.91
+92.61
+99.90
+92.76
+99.90
+Accuracy
+Recon. Cos. Sim.
+↓p-value (log10)
+↓∆Cos
+(c) AG News
+−0.25
+0.00
+0.25
+0.50
+0.75
+1.00
+1.25
+1.50
+Detection Performance (∆Cos & p-value (log10))
+0.51
+0.47
+0.25
+0.47
+0.25
+0.24
+-0.14
+0.01
+0.05
+0.01
+10
+15
+20
+50
+100
+Number of Clusters (N)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+95.55
+99.60
+95.25
+99.54
+95.60
+99.54
+95.80
+99.63
+95.80
+99.60
+Accuracy
+Recon. Cos. Sim.
+↓p-value (log10)
+↓∆Cos
+(d) Enron
+Figure 9: The impact of cluster numbers (n) in CSE for different datasets.
+Dataset
+Size
+Detection Performance
+p-value
+∆cos(%)
+∆l2(%)
+SST2
+Small
+> 0.57
+0.41
+-0.81
+MIND
+> 10−4
+1.38
+-2.76
+AG News
+> 0.57
+-0.08
+0.17
+Enron
+> 0.08
+0.63
+-1.27
+SST2
+Base
+> 0.17
+0.00
+-0.01
+MIND
+> 10−3
+-0.01
+0.03
+AG News
+> 0.17
+0.00
+-0.01
+Enron
+> 0.57
+0.00
+-0.01
+SST2
+Large
+> 0.56
+0.89
+-1.79
+MIND
+> 0.17
+0.37
+-0.74
+AG News
+> 0.98
+0.04
+-0.09
+Enron
+> 0.57
+0.28
+-0.56
+Table 6: The impact of extracted model size on CSE
+performance.
+C.4
+Impact of Attacker Model Size
+We evaluate if there are any differences in our at-
+tack’s performance for different attacker model
+sizes. This is tested by performing experiments
+on small, base, and large versions of the BERT
+(Devlin et al., 2019) model. As illustrated in the
+Table 6, the attack effectively bypasses the water-
+mark when the stealer uses different sizes of the
+backbone model.
+D
+WARDEN Defense Analyses
+D.1
+Remaining Dataset Results
+In this subsection, we present the results (Figure 12-
+15) for all the remaining datasets discussed in Sec-
+tion 4.3.
+D.2
+Number of Principal Components (K) in
+CSE
+Because we augment more target embeddings in
+WARDEN, default configurations of CSE may not
+be adequate. We tweak the CSE attack by increas-
+ing the principal components eliminated, as shown
+in Figure 16. We note that for a higher number of
+principal components, CSE is effective in some se-
+tups, as we recover more of the target embeddings.
+However, one thing to note is that the downstream
+metrics are poor if we eliminate a large number of
+principal components, undermining the attacker’s
+objective.
+D.3
+Access to Target Embeddings
+In the unlikely event that an attacker has access to
+all the target embeddings, it should be possible to
+bypass WARDEN. We replicate this scenario and
+apply the elimination step of the CSE attack using
+these embeddings. As expected, in such a case, we
+can circumvent WARDEN (see Figure 17).
+13
+
+(a) SST2
+(b) MIND
+(c) AG News
+(d) Enron
+Figure 10: t-SNE (Van der Maaten and Hinton, 2008) visualisations for K-Means clustering (n = 3) for different
+datasets. It is evident from the plots that the watermarked samples are not clustered together but instead spread
+across the embedding space with non-coinciding centroids.
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+0.20
+0.01
+0.68
+1.09
+0.63
+1.05
+0.45
+0.76
+-0.02
+0.08
+0.48
+2.40
+0.47
+0.47
+5
+10
+25
+50
+100
+500
+1000
+Number of principal components (K)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+92.72
+99.22
+91.57
+99.42
+90.88
+99.59
+91.97
+99.65
+90.60
+99.78
+87.04
+99.97
+84.52
+100.00
+Accuracy
+Recon. Cos. Sim.
+↓p-value (log10)
+↓∆Cos
+(a) SST2
+−2
+0
+2
+4
+6
+8
+10
+12
+14
+16
+Detection Performance (∆Cos & p-value (log10))
+7.06
+7.95
+7.38
+10.84
+1.91
+2.95
+0.70
+1.47
+0.24
+1.09
+-0.39
+1.47
+-0.51
+0.47
+5
+10
+25
+50
+100
+500
+1000
+Number of principal components (K)
+60
+65
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+76.68
+94.47
+76.42
+96.83
+75.99
+98.81
+75.72
+99.31
+74.93
+99.61
+72.55
+99.93
+69.76
+99.98
+Accuracy
+Recon. Cos. Sim.
+↓p-value (log10)
+↓∆Cos
+(b) MIND
+0
+2
+4
+6
+8
+10
+12
+14
+Detection Performance (∆Cos & p-value (log10))
+11.15
+10.84
+3.06
+9.24
+0.52
+2.40
+0.30
+0.76
+-0.13
+0.47
+-0.53
+1.09
+-0.06
+0.24
+5
+10
+25
+50
+100
+500
+1000
+Number of principal components (K)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+94.14
+98.00
+93.68
+99.40
+93.32
+99.82
+92.34
+99.91
+91.87
+99.95
+89.57
+99.99
+86.78
+100.00
+Accuracy
+Recon. Cos. Sim.
+↓p-value (log10)
+↓∆Cos
+(c) AG News
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+2.04
+2.95
+0.87
+1.09
+0.69
+0.24
+0.25
+0.24
+0.07
+0.24
+-0.78
+1.09
+-0.78
+1.09
+5
+10
+25
+50
+100
+500
+1000
+Number of principal components (K)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+95.90
+98.80
+95.75
+99.14
+95.85
+99.42
+95.60
+99.54
+95.40
+99.65
+94.50
+99.86
+94.50
+99.86
+Accuracy
+Recon. Cos. Sim.
+↓p-value (log10)
+↓∆Cos
+(d) Enron
+Figure 11: The impact of number of principal components (N) in CSE for different datasets.
+2
+3
+4
+5
+10
+Number of Watermark (R)
+70
+75
+80
+85
+90
+Task Performance (Accuracy)
+92.75
+93.30
+93.26
+93.23
+92.34
+Accuracy
+↑p-value (log10)
+↑∆Cos
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+1.88
+4.35
+1.13
+1.46
+2.50
+4.64
+4.08
+6.52
+3.06
+6.49
+(a) SST2
+2
+3
+4
+5
+10
+Number of Watermark (R)
+75.5
+76.0
+76.5
+77.0
+77.5
+78.0
+Task Performance (Accuracy)
+77.25
+77.20
+77.23
+77.17
+77.24
+Accuracy
+↑p-value (log10)
+↑∆Cos
+4
+5
+6
+7
+8
+9
+10
+11
+Detection Performance (∆Cos & p-value (log10))
+3.75
+4.25
+5.51
+8.17
+7.54
+8.56
+6.62
+7.44
+8.91
+10.84
+(b) MIND
+2
+3
+4
+5
+10
+Number of Watermark (R)
+70
+75
+80
+85
+90
+Task Performance (Accuracy)
+93.52
+93.60
+93.48
+93.49
+93.53
+Accuracy
+↑p-value (log10)
+↑∆Cos
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+Detection Performance (∆Cos & p-value (log10))
+13.20
+10.84
+12.49
+10.84
+13.87
+10.84
+14.29
+10.84
+14.54
+10.84
+(c) AG News
+2
+3
+4
+5
+10
+Number of Watermark (R)
+70
+75
+80
+85
+90
+95
+Task Performance (Accuracy)
+94.80
+94.71
+94.58
+94.60
+94.64
+Accuracy
+↑p-value (log10)
+↑∆Cos
+3
+4
+5
+6
+7
+8
+9
+10
+Detection Performance (∆Cos & p-value (log10))
+4.45
+8.11
+4.50
+5.20
+5.24
+7.95
+4.31
+5.32
+5.54
+6.42
+(d) Enron
+Figure 12: The impact of number of watermarks (R) in WARDEN for different datasets. As expected, detection
+performance (yellow and green lines) shows an upward trend with stable task performance.
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+0.85
+0.63
+3.16
+1.41
+1.44
+0.12
+5.36
+1.99
+4.82
+2.82
+2
+3
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+90.00
+99.21
+88.42
+98.67
+88.81
+98.08
+89.27
+96.56
+90.44
+94.87
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+(a) SST2
+2
+3
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+74.82
+98.73
+74.71
+98.04
+74.52
+97.80
+74.52
+97.15
+74.91
+95.42
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+−4
+−2
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+1.46
+1.10
+3.57
+-1.01
+5.24
+-0.81
+5.66
+0.71
+4.95
+1.23
+(b) MIND
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+1.79
+0.68
+2.40
+-0.07
+1.60
+0.83
+5.65
+1.81
+4.65
+0.89
+2
+3
+4
+5
+10
+Number of Watermarks (R)
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+92.93
+99.79
+93.04
+99.63
+93.17
+99.40
+93.18
+99.23
+92.61
+98.57
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+(c) AG News
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+0.79
+0.65
+1.42
+2.09
+2.39
+2.30
+1.90
+4.17
+3.68
+8.16
+2
+3
+4
+5
+10
+Number of Watermarks (R)
+80.0
+82.5
+85.0
+87.5
+90.0
+92.5
+95.0
+97.5
+100.0
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+95.17
+99.02
+95.42
+96.80
+95.37
+95.50
+95.23
+95.27
+95.25
+94.37
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+(d) Enron
+Figure 13: The impact of number of watermarks (R) in WARDEN against CSE for different datasets. The observation
+is similar to Figure 12, along with a decreasing trend in attack performance (red line) demonstrating the effectiveness
+of WARDEN defense against CSE attack.
+14
+
+2
+3
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+95
+100
+Task Performance (Accuracy)
+93.12
+93.00
+93.35
+93.00
+93.58
+Accuracy
+↑p-value (log10)
+↑∆Cos
+10
+15
+20
+25
+30
+35
+40
+45
+50
+Detection Performance (∆Cos & p-value (log10))
+12.74
+9.24
+12.90
+10.84
+27.57
+10.84
+20.21
+10.84
+49.76
+10.84
+(a) SST2
+2
+3
+4
+5
+10
+Number of Watermarks (R)
+75.5
+76.0
+76.5
+77.0
+77.5
+78.0
+Task Performance (Accuracy)
+77.15
+77.20
+77.40
+77.27
+77.13
+Accuracy
+↑p-value (log10)
+↑∆Cos
+10
+20
+30
+40
+50
+Detection Performance (∆Cos & p-value (log10))
+9.49
+10.84
+25.16
+10.84
+13.17
+9.24
+16.55
+7.95
+50.12
+10.84
+(b) MIND
+2
+3
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+95
+100
+Task Performance (Accuracy)
+93.78
+93.45
+93.62
+93.67
+93.82
+Accuracy
+↑p-value (log10)
+↑∆Cos
+0
+20
+40
+60
+80
+100
+Detection Performance (∆Cos & p-value (log10))
+55.75
+10.84
+68.42
+10.84
+69.17
+10.84
+60.65
+10.84
+77.47
+10.84
+(c) AG News
+2
+3
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+95
+100
+Task Performance (Accuracy)
+94.45
+94.20
+94.05
+94.20
+94.40
+Accuracy
+↑p-value (log10)
+↑∆Cos
+5
+10
+15
+20
+25
+30
+35
+40
+Detection Performance (∆Cos & p-value (log10))
+20.67
+5.88
+20.25
+6.84
+29.30
+7.95
+20.79
+10.84
+41.65
+10.84
+(d) Enron
+Figure 14: The impact of number of watermarks (R) in WARDEN GS extension for remaining datasets. Same trend
+as Figure 12, but stronger metrics.
+2
+3
+5
+10
+Number of Watermarks (R)
+50
+60
+70
+80
+90
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+99.20
+87.73
+98.45
+87.96
+79.74
+87.73
+52.09
+86.70
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+0
+10
+20
+30
+40
+50
+Detection Performance (∆Cos & p-value (log10))
+1.17
+2.40
+-0.04
+1.91
+24.35
+10.84
+54.38
+10.84
+(a) SST2
+2
+3
+5
+10
+Number of Watermarks (R)
+40
+50
+60
+70
+80
+90
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+98.61
+74.86
+85.27
+74.69
+49.07
+75.00
+36.17
+74.86
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+0
+5
+10
+15
+20
+25
+30
+35
+Detection Performance (∆Cos & p-value (log10))
+1.32
+3.57
+20.69
+7.95
+34.51
+10.84
+34.42
+9.24
+(b) MIND
+0.0
+2.5
+5.0
+7.5
+10.0
+12.5
+15.0
+17.5
+20.0
+Detection Performance (∆Cos & p-value (log10))
+0.28
+0.76
+0.43
+1.91
+-0.06
+6.84
+11.18
+10.84
+2
+3
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+99.82
+92.97
+99.73
+92.96
+99.24
+92.42
+92.22
+92.53
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+(c) AG News
+2
+3
+5
+10
+Number of Watermarks (R)
+50
+60
+70
+80
+90
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+98.47
+95.35
+96.62
+95.45
+93.25
+95.20
+43.02
+95.10
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+0
+10
+20
+30
+40
+50
+Detection Performance (∆Cos & p-value (log10))
+0.81
+2.40
+1.01
+1.09
+3.51
+5.88
+36.92
+10.84
+(d) Enron
+Figure 15: The impact of number of watermarks (R) in WARDEN GS extension against CSE for different datasets.
+Same trend as 13, but stronger metrics.
+0
+10
+20
+30
+40
+50
+Detection Performance (∆Cos & p-value (log10))
+22.30
+10.84
+16.97
+10.84
+4.89
+5.88
+1.36
+4.25
+1.06
+4.25
+0.84
+2.95
+5
+10
+25
+100
+500
+1000
+Number of principal components (K)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+92.89
+92.19
+91.06
+92.49
+92.32
+96.42
+90.02
+98.71
+86.47
+99.69
+85.32
+99.82
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+(a) SST2
+0
+10
+20
+30
+40
+50
+Detection Performance (∆Cos & p-value (log10))
+16.76
+9.24
+13.15
+9.24
+5.04
+6.84
+1.17
+6.84
+0.89
+7.95
+0.46
+9.24
+5
+10
+25
+100
+500
+1000
+Number of principal components (K)
+50
+60
+70
+80
+90
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+76.93
+85.56
+76.50
+86.77
+75.99
+96.11
+74.35
+98.08
+71.70
+99.72
+68.55
+99.95
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+(b) MIND
+0
+10
+20
+30
+40
+50
+Detection Performance (∆Cos & p-value (log10))
+32.24
+10.84
+11.34
+10.84
+1.94
+6.84
+0.68
+5.88
+0.17
+2.95
+0.28
+1.91
+5
+10
+25
+100
+500
+1000
+Number of principal components (K)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+93.84
+98.70
+93.61
+99.17
+93.12
+99.59
+91.93
+99.82
+88.93
+99.97
+83.74
+99.99
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+(c) AG News
+0
+10
+20
+30
+40
+50
+Detection Performance (∆Cos & p-value (log10))
+19.14
+9.24
+11.47
+9.24
+3.91
+3.57
+1.70
+4.25
+3.24
+9.24
+3.24
+9.24
+5
+10
+25
+100
+500
+1000
+Number of principal components (K)
+70
+75
+80
+85
+90
+95
+100
+Task & Attack Performance (Accuracy & Recon. Cos. Sim.)
+95.95
+90.26
+95.35
+92.06
+95.00
+95.88
+95.15
+97.82
+94.05
+99.87
+94.05
+99.87
+Accuracy
+Recon. Cos. Sim.
+↑p-value (log10)
+↑∆Cos
+(d) Enron
+Figure 16: Against WARDEN, the impact of number of principal components (K) in CSE for different datasets.
+2
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+Task Performance (Accuracy)
+92.89
+93.00
+92.78
+92.78
+Accuracy
+↓p-value (log10)
+↓∆Cos
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+-0.16
+0.76
+0.42
+2.95
+0.16
+1.09
+0.77
+6.84
+(a) SST2
+2
+4
+5
+10
+Number of Watermarks (R)
+70
+71
+72
+73
+74
+75
+76
+77
+78
+Task Performance (Accuracy)
+77.17
+77.09
+77.26
+76.97
+Accuracy
+↓p-value (log10)
+↓∆Cos
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+0.21
+0.76
+0.12
+1.47
+-0.19
+1.91
+0.26
+4.25
+(b) MIND
+2
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+Task Performance (Accuracy)
+93.70
+93.88
+93.82
+93.93
+Accuracy
+↓p-value (log10)
+↓∆Cos
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+0.23
+1.09
+0.05
+0.47
+0.22
+1.47
+0.22
+1.91
+(c) AG News
+2
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+95
+Task Performance (Accuracy)
+95.70
+95.75
+95.95
+95.80
+Accuracy
+↓p-value (log10)
+↓∆Cos
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+-0.14
+1.09
+0.30
+2.95
+0.95
+5.02
+0.45
+3.57
+(d) Enron
+Figure 17: WARDEN detection performance when secret watermarks (W ) are eliminated for different datasets.
+2
+4
+5
+10
+Number of Watermarks (R)
+91.25
+91.50
+91.75
+92.00
+92.25
+92.50
+92.75
+93.00
+93.25
+Task Performance (Accuracy)
+93.23
+93.26
+93.26
+93.26
+Accuracy
+↓p-value (log10)
+↓∆Cos
+−2
+0
+2
+4
+6
+8
+10
+12
+14
+Detection Performance (∆Cos & p-value (log10))
+-1.00
+2.81
+0.42
+4.05
+0.98
+2.99
+0.80
+9.45
+(a) SST2
+2
+4
+5
+10
+Number of Watermarks (R)
+75.25
+75.50
+75.75
+76.00
+76.25
+76.50
+76.75
+77.00
+77.25
+Task Performance (Accuracy)
+77.21
+77.22
+77.22
+77.21
+Accuracy
+↓p-value (log10)
+↓∆Cos
+−1
+0
+1
+2
+3
+4
+5
+6
+7
+Detection Performance (∆Cos & p-value (log10))
+-0.03
+0.31
+0.89
+1.37
+0.66
+3.01
+1.03
+4.55
+(b) MIND
+2
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+95
+Task Performance (Accuracy)
+93.64
+93.59
+93.64
+93.64
+Accuracy
+↓p-value (log10)
+↓∆Cos
+0
+2
+4
+6
+8
+10
+Detection Performance (∆Cos & p-value (log10))
+0.43
+0.46
+1.13
+1.43
+0.43
+1.93
+1.94
+5.66
+(c) AG News
+2
+4
+5
+10
+Number of Watermarks (R)
+70
+75
+80
+85
+90
+95
+Task Performance (Accuracy)
+94.84
+94.81
+94.81
+94.81
+Accuracy
+↓p-value (log10)
+↓∆Cos
+0
+1
+2
+3
+4
+5
+6
+7
+Detection Performance (∆Cos & p-value (log10))
+0.30
+0.88
+0.54
+2.41
+0.60
+4.81
+0.51
+4.93
+(d) Enron
+Figure 18: WARDEN detection performance on a non-watermarked victim model for different datasets for different
+numbers of watermarks (R).
+15
