@@ -11,3 +11,6 @@ dependencies:
     - Pillow
     - pytesseract
     - numpy
+    - tqdm
+    - anthropic
+    - python-dotenv
