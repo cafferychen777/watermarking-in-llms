@@ -103,11 +103,15 @@ The processing results are stored in:
 │   │   └── papers_info.json
 │   └── text/
 │       └── *.txt
+├── results/
+│   └── analysis/
+│       └── *.json
 ├── logs/
-│   └── pdf_processing_*.log
+│   └── *.log
 ├── papers/
 │   └── *.pdf
 ├── scripts/
+│   ├── analyze_papers.py
 │   ├── fetch_arxiv_abstracts.py
 │   └── pdf_to_text.py
 ├── environment.yml
@@ -242,27 +246,4 @@ Analysis results are stored in JSON format with timestamps:
     }
   }
 }
-```
-
-### Directory Structure
-```
-.
-├── data/
-│   ├── abstract/
-│   │   └── papers_info.json
-│   └── text/
-│       └── *.txt
-├── results/
-│   └── analysis/
-│       └── *.json
-├── logs/
-│   └── *.log
-├── papers/
-│   └── *.pdf
-├── scripts/
-│   ├── analyze_papers.py
-│   ├── fetch_arxiv_abstracts.py
-│   └── pdf_to_text.py
-├── environment.yml
-└── README.md
 ```
