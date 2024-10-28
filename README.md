@@ -39,6 +39,7 @@ json) with the following structure:
   "arxiv_id": "XXXX.XXXXX",
   "url": "https://arxiv.org/abs/XXXX.XXXXX"
 }
+```
 
 Example of actual fetched data:
 ```json
