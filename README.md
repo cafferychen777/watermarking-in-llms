@@ -118,6 +118,122 @@ The processing results are stored in:
 └── README.md
 ```
 
+## Review Paper Structure
+
+### Proposed Structure for LLM Watermarking Review
+
+1. **Introduction**
+   - Background and motivation
+   - Challenges in LLM watermarking
+   - Scope of this review
+
+2. **Preliminaries**
+   - Basic concepts of LLM watermarking
+   - Design objectives
+     * Detectability
+     * Quality preservation  
+     * Robustness
+     * Security
+
+3. **Taxonomy of LLM Watermarking Approaches**
+   - Token-level watermarking
+   - Semantic-level watermarking 
+   - Distribution-preserving watermarking
+   - Multi-bit watermarking
+   - Distortion-free watermarking
+
+4. **Key Components and Techniques**
+   - Watermark embedding methods
+   - Detection algorithms
+   - Statistical testing frameworks
+   - Optimization strategies
+
+5. **Evaluation and Benchmarking**
+   - Evaluation metrics
+   - Benchmark datasets
+   - Experimental setups
+   - Performance comparison
+
+6. **Robustness Analysis**
+   - Common attack vectors
+     * Paraphrasing attacks
+     * Translation attacks
+     * Editing attacks
+   - Defense mechanisms
+   - Theoretical bounds
+
+7. **Applications and Use Cases**
+   - Content attribution
+   - Copyright protection
+   - Model ownership verification
+   - Malicious use prevention
+
+8. **Open Challenges and Future Directions**
+   - Current limitations
+   - Emerging research questions
+   - Potential improvements
+   - Future applications
+
+9. **Conclusion**
+
+## Paper Analysis
+
+### Analysis Scripts
+The project includes scripts for analyzing watermarking papers using Claude API:
+
+```bash
+# List available papers
+python scripts/analyze_papers.py --list --input-dir data/text
+
+# Analyze a single paper
+python scripts/analyze_papers.py --mode single --papers "paper_name" --input-dir data/text
+
+# Analyze multiple papers in batch
+python scripts/analyze_papers.py --mode batch --papers "paper1" "paper2" --input-dir data/text
+```
+
+### Analysis Modes
+1. **Single Paper Analysis**
+   - Analyzes one paper at a time
+   - Focuses on core contributions and technical details
+   - Outputs to `results/analysis/analysis_[paper_name]_[timestamp].json`
+
+2. **Batch Analysis**
+   - Compares multiple papers (2-3 recommended)
+   - Focuses on unique innovations and comparative strengths
+   - Outputs to `results/analysis/batch_analysis_[paper_names]_[timestamp].json`
+
+### Analysis Focus
+The analysis particularly emphasizes:
+- Key innovations and unique contributions
+- Technical uniqueness compared to other approaches
+- Comparative strengths and trade-offs
+
+### Output Structure
+Analysis results are stored in JSON format with timestamps:
+```json
+{
+  "papers": ["paper1_name", "paper2_name"],
+  "analysis": {
+    "key_innovation": {
+      "unique_contribution": "...",
+      "difference_from_existing": "...",
+      "novel_problem_solved": "..."
+    },
+    "technical_uniqueness": {
+      "core_advantage": "...",
+      "unique_features": "...",
+      "special_capabilities": "..."
+    },
+    "comparative_strengths": {
+      "advantages": "...",
+      "improvements": "...",
+      "trade_offs": "..."
+    }
+  }
+}
+```
+
 ## Literature Review
 
 ### Paper Categories
@@ -189,61 +305,3 @@ The processing results are stored in:
    - ["WaterJudge: Quality-Detection Trade-off"](papers/WaterJudge.pdf)
    - ["Mark My Words: Analyzing and Evaluating Language Model Watermarks"](papers/Mark_My_Words.pdf)
    - ["WaterBench: Towards Holistic Evaluation of Watermarks"](papers/WaterBench.pdf)
-
-## Paper Analysis
-
-### Analysis Scripts
-The project includes scripts for analyzing watermarking papers using Claude API:
-
-```bash
-# List available papers
-python scripts/analyze_papers.py --list --input-dir data/text
-
-# Analyze a single paper
-python scripts/analyze_papers.py --mode single --papers "paper_name" --input-dir data/text
-
-# Analyze multiple papers in batch
-python scripts/analyze_papers.py --mode batch --papers "paper1" "paper2" --input-dir data/text
-```
-
-### Analysis Modes
-1. **Single Paper Analysis**
-   - Analyzes one paper at a time
-   - Focuses on core contributions and technical details
-   - Outputs to `results/analysis/analysis_[paper_name]_[timestamp].json`
-
-2. **Batch Analysis**
-   - Compares multiple papers (2-3 recommended)
-   - Focuses on unique innovations and comparative strengths
-   - Outputs to `results/analysis/batch_analysis_[paper_names]_[timestamp].json`
-
-### Analysis Focus
-The analysis particularly emphasizes:
-- Key innovations and unique contributions
-- Technical uniqueness compared to other approaches
-- Comparative strengths and trade-offs
-
-### Output Structure
-Analysis results are stored in JSON format with timestamps:
-```json
-{
-  "papers": ["paper1_name", "paper2_name"],
-  "analysis": {
-    "key_innovation": {
-      "unique_contribution": "...",
-      "difference_from_existing": "...",
-      "novel_problem_solved": "..."
-    },
-    "technical_uniqueness": {
-      "core_advantage": "...",
-      "unique_features": "...",
-      "special_capabilities": "..."
-    },
-    "comparative_strengths": {
-      "advantages": "...",
-      "improvements": "...",
-      "trade_offs": "..."
-    }
-  }
-}
-```
