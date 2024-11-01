@@ -304,3 +304,6 @@ Analysis results are stored in JSON format with timestamps:
    - ["WaterJudge: Quality-Detection Trade-off"](papers/WaterJudge.pdf)
    - ["Mark My Words: Analyzing and Evaluating Language Model Watermarks"](papers/Mark_My_Words.pdf)
    - ["WaterBench: Towards Holistic Evaluation of Watermarks"](papers/WaterBench.pdf)
+
+8. **Survey Papers**:
+   - ["A Survey of Text Watermarking in the Era of Large Language Models"](papers/A_Survey_of_Text_Watermarking.pdf)
